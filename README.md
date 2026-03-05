@@ -122,7 +122,7 @@ Open WebUI will be available at **http://localhost:3000** once all containers ar
 ### Filters
 
 <img src="https://img.shields.io/badge/pipeline-filters-EF5350?style=flat-square" alt="Filters"/>
-<img src="https://img.shields.io/badge/count-6-555?style=flat-square" alt="6"/>
+<img src="https://img.shields.io/badge/count-7-555?style=flat-square" alt="7"/>
 
 Pipeline filters that run on every message to pre- or post-process input and output.
 
@@ -132,6 +132,7 @@ Pipeline filters that run on every message to pre- or post-process input and out
 - `semantic_router_filter`: routes queries to a configured model based on content
 - `doodle_paint_filter`: injects artistic style directives
 - `openrouter_websearch_citations_filter`: formats and surfaces OpenRouter web search citations
+- `glm_v_box_token_filter`: strips `<|begin_of_box|>` and `<|end_of_box|>` tokens from GLM V model responses
 
 </td>
 </tr>
@@ -162,6 +163,7 @@ Native tool-use extensions the model can call during a conversation.
 - `create_image_cf`: image generation via Cloudflare Workers AI
 - `philosopher_api_tool`: philosophical reasoning and quotes
 - `rpg_tool_set`: RPG dice, character generation, and game utilities
+- `perplexica_search`: web search via local Perplexica instance
 
 </td>
 </tr>
@@ -171,7 +173,7 @@ Native tool-use extensions the model can call during a conversation.
 ### Function Pipes
 
 <img src="https://img.shields.io/badge/function-pipes-9C27B0?style=flat-square" alt="Function Pipes"/>
-<img src="https://img.shields.io/badge/count-7-555?style=flat-square" alt="7"/>
+<img src="https://img.shields.io/badge/count-10-555?style=flat-square" alt="10"/>
 
 Full pipeline functions that replace or augment the model's response loop.
 
@@ -182,6 +184,9 @@ Full pipeline functions that replace or augment the model's response loop.
 - `flux_kontext_comfyui_pipe`: Flux Kontext image editing pipeline via ComfyUI
 - `veo3_pipe`: video generation pipeline
 - `resume`: resume analysis and career coaching pipeline
+- `perplexica_pipe`: AI search pipeline via local Perplexica instance
+- `letta_agent`: connects to Letta autonomous agents with SSE streaming and tool call support
+- `mopidy_music_controller`: controls Mopidy music server for local library and YouTube playback
 
 </td>
 </tr>
@@ -306,7 +311,6 @@ docker compose up -d
 Access:
 
 - Open WebUI → http://localhost:3000
-- SearXNG → http://localhost:8888
 
 <br>
 
