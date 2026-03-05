@@ -3,6 +3,9 @@
 env/*.env
 !env/*.env.example
 
+# mcpo config gets postgres password injected at bootstrap/deploy time — exclude the runtime copy
+conf/mcposerver/config.json
+
 # runtime data
 data/
 logs/

@@ -5,7 +5,7 @@ general:
   # Debug mode, only for development. Is overwritten by ${SEARXNG_DEBUG}
   debug: false
   # displayed name
-  instance_name: "BitWise-SearXNG"
+  instance_name: "SearXNG"
   # For example: https://example.com/privacy
   privacypolicy_url: false
   # use true to use your own donation page written in searx/info/en/donate.md
@@ -18,7 +18,7 @@ general:
   # expose stats in open metrics format at /metrics
   # leave empty to disable (no password set)
   # open_metrics: <password>
-  open_metrics: 'admin1369'
+  open_metrics: ''
 
 brand:
   new_issue_url: https://github.com/searxng/searxng/issues/new

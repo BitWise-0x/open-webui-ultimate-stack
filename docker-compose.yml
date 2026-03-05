@@ -139,6 +139,7 @@ services:
     command: -c /tika-config.xml
     environment:
       TZ: America/New_York
+      TIKA_VERSION: ${TIKA_TAG:-3.2.2.0}
     healthcheck:
       test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:9998/tika || exit 1"]
       interval: 30s
@@ -176,7 +177,7 @@ services:
       start_period: 60s
       timeout: 10s
     volumes:
-      - ./conf/mcposerver:/app/conf:rw
+      - ./conf/mcposerver:/app/conf:ro
     networks:
       - backend
     restart: unless-stopped
