@@ -53,14 +53,14 @@ flowchart TD
     subgraph Stack ["open-webui-ultimate-stack"]
         direction TB
 
-        OW["<b>openwebui</b>\nghcr.io/open-webui/open-webui:main\n:8080"]
-        DB["<b>db</b>\npgvector/pgvector:pg17\n:5432"]
-        Redis["<b>redis</b>\nvalkey/valkey:8-alpine\n:6379"]
-        SearXNG["<b>searxng</b>\nsearxng/searxng\n:8080"]
-        Tika["<b>tika</b>\napache/tika:full\n:9998"]
-        EdgeTTS["<b>edgetts</b>\nopenai-edge-tts\n:5050"]
-        MCP["<b>mcposerver</b>\nghcr.io/open-webui/mcpo\n:8000"]
-        ToolsInit["<b>tools-init</b>\npython:3.12-slim\none-shot"]
+        OW["openwebui\nghcr.io/open-webui/open-webui:main\n:8080"]
+        DB["db\npgvector/pgvector:pg17\n:5432"]
+        Redis["redis\nvalkey/valkey:8-alpine\n:6379"]
+        SearXNG["searxng\nsearxng/searxng\n:8080"]
+        Tika["tika\napache/tika:full\n:9998"]
+        EdgeTTS["edgetts\nopenai-edge-tts\n:5050"]
+        MCP["mcposerver\nghcr.io/open-webui/mcpo\n:8000"]
+        ToolsInit["tools-init\npython:3.12-slim\none-shot"]
 
         OW --> DB
         OW --> Redis
@@ -83,10 +83,6 @@ flowchart TD
 
 ## Services
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
 ### Core
 
 <img src="https://img.shields.io/badge/Open_WebUI-main-000000?style=flat-square&logo=openai&logoColor=white" alt="Open WebUI"/>
@@ -97,9 +93,6 @@ flowchart TD
 - **db**: PostgreSQL 17 with pgvector for vector embeddings and semantic search
 - **redis**: Valkey (Redis-compatible) for WebSocket session management and caching
 
-</td>
-<td width="50%" valign="top">
-
 ### Search & Documents
 
 <img src="https://img.shields.io/badge/SearXNG-2025.7.10-EF5350?style=flat-square" alt="SearXNG"/>
@@ -109,12 +102,6 @@ flowchart TD
 - **tika**: Apache Tika with Tesseract OCR for extracting text from PDFs, images, and Office docs; OCR behavior is tunable via `conf/tika/customocr/TesseractOCRConfig.properties`
 - **docling** *(optional)*: heavy document extraction service with advanced layout understanding; enable by uncommenting from the compose file and configuring `env/docling.env`
 
-</td>
-</tr>
-
-<tr>
-<td width="50%" valign="top">
-
 ### AI Integrations
 
 <img src="https://img.shields.io/badge/edge--tts-OpenAI_compatible-4CAF50?style=flat-square" alt="EdgeTTS"/>
@@ -123,28 +110,17 @@ flowchart TD
 - **edgetts**: local text-to-speech server (Microsoft Edge voices, OpenAI-compatible API)
 - **mcposerver**: MCP to OpenAPI proxy; exposes MCP tool servers as REST endpoints consumable by Open WebUI
 
-</td>
-<td width="50%" valign="top">
-
 ### Automation
 
 <img src="https://img.shields.io/badge/Python-3.12--slim-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 
 - **tools-init**: one-shot init container; waits for Open WebUI to be healthy, then pushes all tools, filters, and function pipes from `conf/tools/` via the REST API; runs on every deploy with upsert support
 
-</td>
-</tr>
-</table>
-
 <br>
 
 <br>
 
 ## Tools & Extensions
-
-<table>
-<tr>
-<td width="50%" valign="top">
 
 ### Filters
 
@@ -159,9 +135,6 @@ Pipeline filters that run on every message to pre- or post-process input and out
 - `semantic_router_filter`: routes queries to a configured model based on content
 - `doodle_paint_filter`: injects artistic style directives
 - `openrouter_websearch_citations_filter`: formats and surfaces OpenRouter web search citations
-
-</td>
-<td width="50%" valign="top">
 
 ### Tools
 
@@ -188,11 +161,6 @@ Native tool-use extensions the model can call during a conversation.
 - `philosopher_api_tool`: philosophical reasoning and quotes
 - `rpg_tool_set`: RPG dice, character generation, and game utilities
 
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
 ### Function Pipes
 
 <img src="https://img.shields.io/badge/function-pipes-9C27B0?style=flat-square" alt="Function Pipes"/>
@@ -208,9 +176,6 @@ Full pipeline functions that replace or augment the model's response loop.
 - `veo3_pipe`: video generation pipeline
 - `resume`: resume analysis and career coaching pipeline
 
-</td>
-<td width="50%" valign="top">
-
 ### ComfyUI Workflows (`extras/`)
 
 <img src="https://img.shields.io/badge/ComfyUI-workflows-FF9800?style=flat-square" alt="ComfyUI Workflows"/>
@@ -223,10 +188,6 @@ ComfyUI API workflow JSONs for use with the bundled tools.
 - Vibe Voice TTS (single speaker + multi-speaker)
 - Wan2.1 14B text-to-video
 - Qwen image editing (standard + 2509 API)
-
-</td>
-</tr>
-</table>
 
 <br>
 
