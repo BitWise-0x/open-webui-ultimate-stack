@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white" alt="Redis"/>
   <br>
   <br>
-  <code><strong style="font-size:1.4em; letter-spacing:0.02em;">open-webui-ultimate-stack</strong></code>
+  <code><strong>open-webui-ultimate-stack</strong></code>
 </h1>
 
 <p align="center">
