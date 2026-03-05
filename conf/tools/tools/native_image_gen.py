@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
 ) -> List[Dict[str, Any]]:
     """Get all currently loaded models in VRAM"""
     try:
@@ -34,7 +34,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434")) -> bool:
+async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
     """Unload all currently loaded models from VRAM"""
     try:
         loaded_models = await get_loaded_models_async(api_url)
@@ -68,7 +68,7 @@ class Tools:
             description="Unload all Ollama models before calling ComfyUI.",
         )
         ollama_url: str = Field(
-            default=os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+            default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             description="Ollama API URL.",
         )
         emit_embeds: bool = Field(
@@ -134,7 +134,7 @@ class Tools:
             bare_urls: list[str] = []
             markdown_attachments: list[str] = []
             for image in images:
-                url = f"{os.getenv('WEBUI_URL', 'https://openwebui.bitwisesolutions.co')}{image['url']}"
+                url = f"{os.getenv('WEBUI_URL', '""')}{image['url']}"
                 bare_urls.append(url)
                 img_html = f'<img src="{url}" style="max-width:100%; height:auto; display:block; border:none; margin:0 0 8px 0; padding:0; border-radius:12px;" />'
                 markdown_attachments.append(img_html)

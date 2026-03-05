@@ -527,7 +527,7 @@ def extract_images_from_messages(messages: List[Dict[str, Any]]) -> List[str]:
 class Tools:
     class Valves(BaseModel):
         comfyui_api_url: str = Field(
-            default=os.getenv("COMFYUI_API_URL", "http://galaxy.bitwise.lan:8188"), description="ComfyUI HTTP API endpoint."
+            default=os.getenv("COMFYUI_API_URL", "http://localhost:8188"), description="ComfyUI HTTP API endpoint."
         )
         comfyui_api_key: str = Field(
             default="",
@@ -548,7 +548,7 @@ class Tools:
             default=False, description="Unload Ollama models before calling ComfyUI."
         )
         ollama_api_url: str = Field(
-            default=os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+            default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             description="Ollama API URL for unloading models.",
         )
         return_html_embed: bool = Field(

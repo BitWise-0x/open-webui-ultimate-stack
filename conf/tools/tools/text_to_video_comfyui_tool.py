@@ -186,7 +186,7 @@ DEFAULT_WORKFLOW: Dict[str, Any] = {
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
 ) -> list[Dict[str, Any]]:
     try:
         async with aiohttp.ClientSession() as session:
@@ -200,7 +200,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434")) -> bool:
+async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
     try:
         loaded_models = await get_loaded_models_async(api_url)
         if not loaded_models:
@@ -449,7 +449,7 @@ async def download_and_upload_to_owui(
 class Tools:
     class Valves(BaseModel):
         comfyui_api_url: str = Field(
-            default=os.getenv("COMFYUI_API_URL", "http://galaxy.bitwise.lan:8188"), description="ComfyUI HTTP API endpoint."
+            default=os.getenv("COMFYUI_API_URL", "http://localhost:8188"), description="ComfyUI HTTP API endpoint."
         )
         comfyui_api_key: str = Field(
             default="",
@@ -482,7 +482,7 @@ class Tools:
             default=False, description="Unload Ollama models before calling ComfyUI."
         )
         ollama_api_url: str = Field(
-            default=os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+            default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             description="Ollama API URL for unloading models.",
         )
         return_html_embed: bool = Field(

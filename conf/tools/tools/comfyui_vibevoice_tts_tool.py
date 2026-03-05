@@ -293,7 +293,7 @@ async def download_audio_to_storage(
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
 ) -> list[Dict[str, Any]]:
     """Get all currently loaded models in VRAM"""
     try:
@@ -308,7 +308,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434")) -> bool:
+async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
     """Unload all currently loaded models from VRAM"""
     try:
         loaded_models = await get_loaded_models_async(api_url)
@@ -744,7 +744,7 @@ def generate_audio_player_embed(
 class Tools:
     class Valves(BaseModel):
         comfyui_api_url: str = Field(
-            default=os.getenv("COMFYUI_API_URL", "http://galaxy.bitwise.lan:8188"),
+            default=os.getenv("COMFYUI_API_URL", "http://localhost:8188"),
             description="ComfyUI HTTP API endpoint.",
         )
         comfyui_api_key: str = Field(
@@ -785,7 +785,7 @@ class Tools:
             description="Unload all Ollama models before calling ComfyUI.",
         )
         ollama_url: str = Field(
-            default=os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+            default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             description="Ollama API URL.",
         )
         save_local: bool = Field(

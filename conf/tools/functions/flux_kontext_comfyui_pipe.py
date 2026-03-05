@@ -168,7 +168,7 @@ class Pipe:
         )
         COMFYUI_ADDRESS: str = Field(
             title="ComfyUI Address",
-            default=os.getenv("COMFYUI_API_URL", "http://galaxy.bitwise.lan:8188"),
+            default=os.getenv("COMFYUI_API_URL", "http://localhost:8188"),
             description="Address of the running ComfyUI server.",
         )
         COMFYUI_API_KEY: str = Field(
@@ -232,7 +232,7 @@ class Pipe:
         )
         OLLAMA_URL: str = Field(
             title="Ollama API URL",
-            default=os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+            default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             description="Ollama API URL for unloading models.",
         )
         MAX_WAIT_TIME: int = Field(
@@ -1295,7 +1295,7 @@ class Pipe:
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434"),
+    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
 ) -> list[Dict[str, Any]]:
     try:
         async with aiohttp.ClientSession() as session:
@@ -1311,7 +1311,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama.bitwise.lan:11434")) -> bool:
+async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
     try:
         models = await get_loaded_models_async(api_url)
         if not models:
