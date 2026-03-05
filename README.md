@@ -154,7 +154,7 @@ Native tool-use extensions the model can call during a conversation.
 - `comfyui_ace_step_audio_tool`: AI audio generation via ComfyUI (v1)
 - `comfyui_ace_step_audio_tool_1_5`: ACE Step v1.5 with selectable encoders
 - `comfyui_vibevoice_tts_tool`: expressive voice TTS via ComfyUI VibeVoice
-- `text_to_video_comfyui_tool`: text-to-video via ComfyUI Wan2.1
+- `text_to_video_comfyui_tool`: text-to-video via ComfyUI Wan2.2
 - `youtube_search_tool`: YouTube search and metadata
 - `pexels_image_search_tool`: Pexels royalty-free image search
 - `openweathermap_forecast_tool`: live weather forecasts
@@ -196,14 +196,14 @@ Full pipeline functions that replace or augment the model's response loop.
 ### ComfyUI Workflows (`extras/`)
 
 <img src="https://img.shields.io/badge/ComfyUI-workflows-FF9800?style=flat-square" alt="ComfyUI Workflows"/>
-<img src="https://img.shields.io/badge/count-10-555?style=flat-square" alt="10"/>
+<img src="https://img.shields.io/badge/count-9-555?style=flat-square" alt="9"/>
 
 ComfyUI API workflow JSONs for use with the bundled tools.
 
 - Flux Kontext image editing
 - ACE Step audio generation (v1 + v1.5)
 - Vibe Voice TTS (single speaker + multi-speaker)
-- Wan2.1 14B text-to-video
+- Wan2.2 14B text-to-video
 - Qwen image editing (standard + 2509 API)
 
 </td>
@@ -324,6 +324,7 @@ cp .env.example .env
 for f in env/*.env.example; do cp "$f" "${f%.example}"; done
 # edit env/owui.env, env/db.env, etc.: fill real values
 # For Swarm, set SEARXNG_BASE_URL=/searxng in env/searxng.env
+# For Swarm+Traefik, set FORWARDED_ALLOW_IPS=10.0.13.0/24 in env/owui.env
 
 ./scripts/deploy-swarm.sh
 # deploy-swarm.sh creates the overlay network and external volumes, then syncs
