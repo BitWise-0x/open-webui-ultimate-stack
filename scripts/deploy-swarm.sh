@@ -39,6 +39,9 @@ echo "[*] Data root:      ${DATA_ROOT}"
 echo ""
 
 # Create overlay network (idempotent)
+# NOTE: The subnet below must match FORWARDED_ALLOW_IPS in env/owui.env.
+# Open WebUI uses that CIDR to trust forwarded IPs from Traefik.
+# If you change the subnet here, update FORWARDED_ALLOW_IPS in env/owui.env to match.
 docker network create \
   --driver overlay \
   --subnet=10.0.13.0/24 \
