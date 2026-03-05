@@ -1,0 +1,215 @@
+version: '3.9'
+
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "1"
+    tag: "{{.Name}}"
+
+services:
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    env_file: env/owui.env
+    environment:
+      TZ: America/New_York
+    volumes:
+      - owui_data:/app/backend/data
+    ports:
+      - "3000:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail localhost:8080/health || exit 1"]
+      interval: 30s
+      retries: 15
+      start_period: 180s
+      timeout: 10s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Traefik (optional reverse proxy) — uncomment if using Traefik on this host
+    # labels:
+    #   - traefik.enable=true
+    #   - traefik.http.routers.openwebui.rule=Host(`openwebui.your.domain.com`)
+    #   - traefik.http.routers.openwebui.middlewares=chain-oauth@file
+    #   - traefik.http.services.openwebui.loadbalancer.server.port=8080
+    logging: *default-logging
+
+  db:
+    image: pgvector/pgvector:pg17
+    env_file: env/db.env
+    user: "999:999"
+    environment:
+      TZ: America/New_York
+    entrypoint: ["/init/entrypoint.sh"]
+    command: ["postgres"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 30s
+      retries: 10
+      start_period: 60s
+      timeout: 10s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./conf/postgres/init:/init:ro
+    networks:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    image: docker.io/valkey/valkey:8-alpine
+    env_file: env/redis.env
+    environment:
+      TZ: America/New_York
+    volumes:
+      - redis_data:/data
+    command: "valkey-server --save 30 1"
+    healthcheck:
+      test: "[ $$(valkey-cli ping) = 'PONG' ]"
+      start_period: 5s
+      interval: 1s
+      timeout: 3s
+      retries: 5
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    networks:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  searxng:
+    image: searxng/searxng:2025.7.10-4b9644e
+    user: "977:977"
+    env_file: env/searxng.env
+    environment:
+      TZ: America/New_York
+    healthcheck:
+      test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:8080 || exit 1"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    cap_drop:
+      - ALL
+    volumes:
+      - searxng_cache:/var/cache/searxng:rw
+      - ./conf/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./conf/searxng/uwsgi.ini:/etc/searxng/uwsgi.ini:ro
+      - ./conf/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+    networks:
+      - backend
+    ports:
+      - "8888:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Traefik (optional)
+    # labels:
+    #   - traefik.enable=true
+    #   - traefik.http.routers.searxng.rule=Host(`openwebui.your.domain.com`) && PathPrefix(`/searxng`)
+    #   - traefik.http.routers.searxng.middlewares=searxng-stripprefix
+    #   - traefik.http.middlewares.searxng-stripprefix.stripPrefix.prefixes=/searxng
+    #   - traefik.http.services.searxng.loadbalancer.server.port=8080
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  tika:
+    image: apache/tika:${TIKA_TAG:-3.2.2.0}-full
+    env_file: env/tika.env
+    entrypoint: ["/bin/sh", "-c", "exec java -cp \"/customocr:/tika-server-standard-$${TIKA_VERSION}.jar:/tika-extras/*\" org.apache.tika.server.core.TikaServerCli -h 0.0.0.0 $$0 $$@"]
+    command: -c /tika-config.xml
+    environment:
+      TZ: America/New_York
+    healthcheck:
+      test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:9998/tika || exit 1"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    volumes:
+      - ./conf/tika/tika-config.xml:/tika-config.xml
+      - ./conf/tika/customocr:/customocr
+    networks:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  edgetts:
+    image: travisvn/openai-edge-tts:latest
+    env_file: env/edgetts.env
+    environment:
+      TZ: America/New_York
+    networks:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  mcposerver:
+    image: ghcr.io/open-webui/mcpo:latest
+    env_file: env/mcp.env
+    environment:
+      TZ: America/New_York
+    command: ["--config", "/app/conf/config.json"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/docs || exit 1"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    volumes:
+      - ./conf/mcposerver:/app/conf:rw
+    networks:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  tools-init:
+    image: python:3.12-slim
+    env_file: env/tools-init.env
+    environment:
+      TZ: America/New_York
+    entrypoint:
+      - bash
+      - -c
+      - |
+        apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1
+        exec bash /scripts/install-tools.sh
+    volumes:
+      - ./conf/tools:/tools:ro
+      - ./scripts/install-tools.sh:/scripts/install-tools.sh:ro
+    networks:
+      - backend
+    depends_on:
+      openwebui:
+        condition: service_healthy
+    restart: on-failure
+    logging: *default-logging
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  owui_data:
+  postgres_data:
+  redis_data:
+  searxng_cache:

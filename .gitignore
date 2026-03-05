@@ -1,0 +1,18 @@
+# secrets — never commit real env files
+.env
+env/*.env
+!env/*.env.example
+
+# runtime data
+data/
+logs/
+*.log
+
+# macOS
+.DS_Store
+
+# editors
+.idea/
+.vscode/
+*.swp
+*.swo
