@@ -63,7 +63,7 @@ services:
       start_period: 60s
       timeout: 10s
     volumes:
-      - postgres:${DATA_ROOT:-/mnt/data}/open-webui/postgres/data
+      - postgres:/var/lib/postgresql/data
       - ${DATA_ROOT:-/mnt/data}/open-webui/postgres/init:/init:ro
     networks:
       - backend
@@ -147,6 +147,7 @@ services:
       labels:
         - traefik.enable=true
         - traefik.swarm.network=traefik-public
+        # SearXNG is served under /searxng — requires SEARXNG_BASE_URL=/searxng in env/searxng.env
         - traefik.http.routers.searxng.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`) && PathPrefix(`/searxng`)
         - traefik.http.routers.searxng.middlewares=chain-oauth@file,searxng-stripprefix
         - traefik.http.middlewares.searxng-stripprefix.stripPrefix.prefixes=/searxng
@@ -165,6 +166,7 @@ services:
     command: -c /tika-config.xml
     environment:
       TZ: America/New_York
+      TIKA_VERSION: ${TIKA_TAG:-3.2.2.0}
     healthcheck:
       test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:9998/tika || exit 1"]
       interval: 30s
@@ -214,7 +216,7 @@ services:
       start_period: 60s
       timeout: 10s
     volumes:
-      - ${DATA_ROOT:-/mnt/data}/open-webui/mcposerver/conf:/app/conf:rw
+      - ${DATA_ROOT:-/mnt/data}/open-webui/mcposerver/conf:/app/conf:ro
     networks:
       - backend
     deploy:
@@ -246,8 +248,8 @@ services:
       replicas: 1
       restart_policy:
         condition: on-failure
-        delay: 30s
-        max_attempts: 3
+        delay: 60s
+        max_attempts: 5
     logging: *default-logging
 
 networks:
@@ -262,4 +264,5 @@ volumes:
     external: true
     name: ${STACK_NAME}_postgresdata
   searxng:
+    external: true
     name: ${STACK_NAME}_searxngcache

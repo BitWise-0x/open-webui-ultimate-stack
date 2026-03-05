@@ -16,7 +16,14 @@ success() { echo -e "${GREEN}[+]${RESET} $*"; }
 warn()    { echo -e "${YELLOW}[!]${RESET} $*"; }
 die()     { echo -e "${RED}[✗]${RESET} $*" >&2; exit 1; }
 
+# Escape special sed characters in a replacement string (/, &, \)
+escape_sed() { printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'; }
+
 cd "$(dirname "$0")"
+
+# --- Sanity check: must run from repo root ---
+[ -d "env" ] || die "env/ directory not found — run bootstrap.sh from the repository root."
+[ -f "docker-compose.yml" ] || die "docker-compose.yml not found — run bootstrap.sh from the repository root."
 
 # --- Prerequisite checks ---
 command -v docker >/dev/null 2>&1 || die "Docker is not installed. Install it from https://docs.docker.com/get-docker/"
@@ -32,7 +39,7 @@ for example in env/*.env.example; do
   if [ -f "$target" ]; then
     warn "  $target already exists — skipping"
   else
-    cp "$target.example" "$target"
+    cp "$example" "$target"
     success "  Created $target"
   fi
 done
@@ -41,7 +48,10 @@ done
 info "Generating secrets..."
 
 generate_secret() {
-  openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))"
+  local s
+  s=$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))")
+  [[ -z "$s" ]] && die "Secret generation failed — install openssl or python3"
+  echo "$s"
 }
 
 inject_secret() {
@@ -54,23 +64,38 @@ inject_secret() {
 
 WEBUI_SECRET=$(generate_secret)
 SEARXNG_SECRET=$(generate_secret)
-DB_PASSWORD=$(openssl rand -base64 24 2>/dev/null | tr -d '/' | head -c 24)
+DB_PASSWORD=$(openssl rand -base64 24 2>/dev/null | tr -d '/+' | head -c 24)
 
-inject_secret env/owui.env  WEBUI_SECRET_KEY   "$WEBUI_SECRET"
-inject_secret env/searxng.env SEARXNG_SECRET   "$SEARXNG_SECRET"
+inject_secret env/owui.env    WEBUI_SECRET_KEY  "$WEBUI_SECRET"
+inject_secret env/searxng.env SEARXNG_SECRET    "$SEARXNG_SECRET"
 
-# Update postgres password in db.env and owui.env consistently
+# Ensure mcposerver runtime config exists (gitignored; generated from example)
+if [ ! -f conf/mcposerver/config.json ]; then
+  cp conf/mcposerver/config.json.example conf/mcposerver/config.json
+fi
+
+# Update postgres password consistently across all files that reference it
 if grep -q "^POSTGRES_PASSWORD=change_me" env/db.env 2>/dev/null; then
   sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${DB_PASSWORD}|" env/db.env && rm -f env/db.env.bak
   success "  Generated POSTGRES_PASSWORD in env/db.env"
-  # Sync the password into the connection strings in owui.env
+
   sed -i.bak \
     -e "s|postgresql://postgres:change_me@|postgresql://postgres:${DB_PASSWORD}@|g" \
     env/owui.env && rm -f env/owui.env.bak
   sed -i.bak \
     -e "s|postgresql://postgres:change_me@|postgresql://postgres:${DB_PASSWORD}@|g" \
     env/mcp.env && rm -f env/mcp.env.bak
-  success "  Synced POSTGRES_PASSWORD into owui.env and mcp.env connection strings"
+  if command -v jq >/dev/null 2>&1; then
+    jq --arg pw "$DB_PASSWORD" \
+      '(.mcpServers[].args[]? | select(type == "string") | select(startswith("postgresql://"))) |= gsub("change_me"; $pw)' \
+      conf/mcposerver/config.json > conf/mcposerver/config.json.tmp \
+      && mv conf/mcposerver/config.json.tmp conf/mcposerver/config.json
+  else
+    sed -i.bak \
+      -e "s|postgresql://postgres:change_me@|postgresql://postgres:${DB_PASSWORD}@|g" \
+      conf/mcposerver/config.json && rm -f conf/mcposerver/config.json.bak
+  fi
+  success "  Synced POSTGRES_PASSWORD into owui.env, mcp.env, and mcposerver/config.json"
 fi
 
 echo ""
@@ -81,8 +106,9 @@ echo "  Enter your Ollama base URL, or press Enter to skip (API-only mode)."
 echo -n "  OLLAMA_BASE_URL [skip]: "
 read -r OLLAMA_URL
 if [ -n "$OLLAMA_URL" ] && [ "$OLLAMA_URL" != "skip" ]; then
-  sed -i.bak "s|^OLLAMA_BASE_URL=.*|OLLAMA_BASE_URL=${OLLAMA_URL}|" env/owui.env && rm -f env/owui.env.bak
-  sed -i.bak "s|^RAG_OLLAMA_BASE_URL=.*|RAG_OLLAMA_BASE_URL=${OLLAMA_URL}|" env/owui.env && rm -f env/owui.env.bak
+  ESCAPED_URL=$(escape_sed "$OLLAMA_URL")
+  sed -i.bak "s|^OLLAMA_BASE_URL=.*|OLLAMA_BASE_URL=${ESCAPED_URL}|" env/owui.env && rm -f env/owui.env.bak
+  sed -i.bak "s|^RAG_OLLAMA_BASE_URL=.*|RAG_OLLAMA_BASE_URL=${ESCAPED_URL}|" env/owui.env && rm -f env/owui.env.bak
   success "  Set OLLAMA_BASE_URL=${OLLAMA_URL}"
 else
   sed -i.bak "s|^ENABLE_OLLAMA_API=true|ENABLE_OLLAMA_API=false|" env/owui.env && rm -f env/owui.env.bak
@@ -98,7 +124,8 @@ echo -n "  OPENAI_API_KEY [skip]: "
 read -r -s OAI_KEY
 echo ""
 if [ -n "$OAI_KEY" ] && [ "$OAI_KEY" != "skip" ]; then
-  sed -i.bak "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=${OAI_KEY}|" env/owui.env && rm -f env/owui.env.bak
+  ESCAPED_KEY=$(escape_sed "$OAI_KEY")
+  sed -i.bak "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=${ESCAPED_KEY}|" env/owui.env && rm -f env/owui.env.bak
   success "  Set OPENAI_API_KEY"
 else
   sed -i.bak "s|^ENABLE_OPENAI_API=true|ENABLE_OPENAI_API=false|" env/owui.env && rm -f env/owui.env.bak

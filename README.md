@@ -4,7 +4,8 @@
   <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
   <img src="https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white" alt="Redis"/>
   <br>
-  <code>open-webui-ultimate-stack</code>
+  <br>
+  <code><strong style="font-size:1.4em; letter-spacing:0.02em;">open-webui-ultimate-stack</strong></code>
 </h1>
 
 <p align="center">
@@ -19,7 +20,9 @@
   Comes pre-loaded with a curated library of tools, filters, and function pipes — automatically slipstreamed into Open WebUI on every deploy.
 </p>
 
----
+<br>
+<br>
+
 
 ## Quick Start
 
@@ -27,10 +30,18 @@
 git clone https://github.com/BitWise-0x/open-webui-ultimate-stack && cd open-webui-ultimate-stack && ./bootstrap.sh
 ```
 
-The bootstrap script copies env examples, generates random secrets, prompts for optional keys, and starts the stack.
+The bootstrap script:
+- verifies Docker and Docker Compose v2 are installed
+- copies all `env/*.env.example` files to `env/*.env`
+- generates random `WEBUI_SECRET_KEY`, `SEARXNG_SECRET`, and `POSTGRES_PASSWORD`
+- creates `conf/mcposerver/config.json` from its example and injects the DB password
+- prompts for optional Ollama URL and OpenAI API key (disables each if skipped)
+- runs `docker compose up -d` and prints access URLs
+
 Open WebUI will be available at **http://localhost:3000** once all containers are healthy.
 
----
+<br>
+<br>
 
 ## Architecture
 
@@ -66,7 +77,9 @@ flowchart TD
     Traefik -.->|"/searxng subpath"| SearXNG
 ```
 
----
+<br>
+
+
 
 ## Services
 
@@ -75,6 +88,7 @@ flowchart TD
 <td width="50%" valign="top">
 
 ### Core
+
 <img src="https://img.shields.io/badge/Open_WebUI-main-000000?style=flat-square&logo=openai&logoColor=white" alt="Open WebUI"/>
 <img src="https://img.shields.io/badge/PostgreSQL-pgvector_pg17-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
 <img src="https://img.shields.io/badge/Valkey-8--alpine-FF4438?style=flat-square&logo=redis&logoColor=white" alt="Valkey"/>
@@ -87,18 +101,22 @@ flowchart TD
 <td width="50%" valign="top">
 
 ### Search & Documents
+
 <img src="https://img.shields.io/badge/SearXNG-2025.7.10-EF5350?style=flat-square" alt="SearXNG"/>
 <img src="https://img.shields.io/badge/Apache_Tika-3.2.2.0--full-009688?style=flat-square" alt="Tika"/>
 
 - **searxng** — private metasearch engine aggregating 70+ sources with no tracking
-- **tika** — Apache Tika with Tesseract OCR for extracting text from PDFs, images, and Office docs
+- **tika** — Apache Tika with Tesseract OCR for extracting text from PDFs, images, and Office docs; OCR behavior is tunable via `conf/tika/customocr/TesseractOCRConfig.properties`
+- **docling** *(optional)* — heavy document extraction service with advanced layout understanding; enable by uncommenting from the compose file and configuring `env/docling.env`
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
 ### AI Integrations
+
 <img src="https://img.shields.io/badge/edge--tts-OpenAI_compatible-4CAF50?style=flat-square" alt="EdgeTTS"/>
 <img src="https://img.shields.io/badge/MCPO-MCP_proxy-7C3AED?style=flat-square" alt="MCPO"/>
 
@@ -109,6 +127,7 @@ flowchart TD
 <td width="50%" valign="top">
 
 ### Automation
+
 <img src="https://img.shields.io/badge/Python-3.12--slim-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 
 - **tools-init** — one-shot init container that waits for Open WebUI health, then automatically pushes the entire `conf/tools/` library — filters, tools, and function pipes — via the internal REST API with upsert support
@@ -118,17 +137,25 @@ flowchart TD
 </tr>
 </table>
 
----
+<br>
+
+<br>
 
 ## Tools & Extensions
 
 Every deploy automatically slipstreams a curated library of tools, pipeline filters, and function pipes directly into Open WebUI — no manual imports, no copy-paste. The `tools-init` container handles it all at startup via the internal API.
+
+<br>
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
 ### Filters
+
+<img src="https://img.shields.io/badge/pipeline-filters-EF5350?style=flat-square" alt="Filters"/>
+<img src="https://img.shields.io/badge/count-6-555?style=flat-square" alt="6"/>
+
 Pipeline filters that run on every message — pre- or post-process input/output transparently.
 
 - `clean_thinking_tags_filter` — strips `<think>` blocks from model responses
@@ -142,6 +169,10 @@ Pipeline filters that run on every message — pre- or post-process input/output
 <td width="50%" valign="top">
 
 ### Tools
+
+<img src="https://img.shields.io/badge/native-tool--use-2196F3?style=flat-square" alt="Tools"/>
+<img src="https://img.shields.io/badge/count-18-555?style=flat-square" alt="18"/>
+
 Native tool-use extensions the model can call during a conversation.
 
 - `arxiv_search_tool` — search and retrieve academic papers from arXiv
@@ -149,7 +180,8 @@ Native tool-use extensions the model can call during a conversation.
 - `searxng_image_search_tool` — image search via the local SearXNG instance
 - `comfyui_text_to_image_tool` — text-to-image generation via ComfyUI
 - `comfyui_image_to_image_tool` — image editing and transformation via ComfyUI
-- `comfyui_ace_step_audio_tool` — AI audio generation via ComfyUI
+- `comfyui_ace_step_audio_tool` — AI audio generation via ComfyUI (v1)
+- `comfyui_ace_step_audio_tool_1_5` — ACE Step v1.5 with selectable encoders
 - `comfyui_vibevoice_tts_tool` — expressive voice TTS via ComfyUI VibeVoice
 - `text_to_video_comfyui_tool` — text-to-video via ComfyUI Wan2.1
 - `youtube_search_tool` — YouTube search and metadata
@@ -167,6 +199,10 @@ Native tool-use extensions the model can call during a conversation.
 <td width="50%" valign="top">
 
 ### Function Pipes
+
+<img src="https://img.shields.io/badge/function-pipes-9C27B0?style=flat-square" alt="Function Pipes"/>
+<img src="https://img.shields.io/badge/count-7-555?style=flat-square" alt="7"/>
+
 Full pipeline functions that replace or augment the model's response loop.
 
 - `planner` — multi-step task decomposition and planning
@@ -181,6 +217,10 @@ Full pipeline functions that replace or augment the model's response loop.
 <td width="50%" valign="top">
 
 ### ComfyUI Workflows (`extras/`)
+
+<img src="https://img.shields.io/badge/ComfyUI-workflows-FF9800?style=flat-square" alt="ComfyUI Workflows"/>
+<img src="https://img.shields.io/badge/count-10-555?style=flat-square" alt="10"/>
+
 Pre-built ComfyUI API workflow JSONs ready to drop into your ComfyUI instance for use with the bundled tools.
 
 - Flux Kontext image editing
@@ -193,7 +233,9 @@ Pre-built ComfyUI API workflow JSONs ready to drop into your ComfyUI instance fo
 </tr>
 </table>
 
----
+<br>
+
+<br>
 
 ## Repository Structure
 
@@ -206,17 +248,20 @@ open-webui-ultimate-stack/
 ├── bootstrap.sh                 Interactive local startup wizard
 ├── scripts/
 │   ├── deploy-swarm.sh          Swarm deploy helper
+│   ├── remove-swarm.sh          Swarm teardown helper
 │   └── install-tools.sh         Init container: auto-push tools via API
 ├── conf/
 │   ├── searxng/                 settings.yml, uwsgi.ini, limiter.toml
 │   ├── tika/                    tika-config.xml + OCR properties
-│   ├── mcposerver/              config.json (MCP server definitions)
+│   ├── mcposerver/              config.json.example (template; config.json gitignored)
 │   ├── postgres/init/           Custom entrypoint + pgvector init
 │   └── tools/
 │       ├── filters/             Python pipeline filters (auto-deployed)
 │       ├── tools/               Python tool definitions (auto-deployed)
 │       ├── functions/           Python pipes and functions (auto-deployed)
 │       └── extras/              ComfyUI API workflow JSONs
+├── docs/
+│   └── passwordreset.md         Emergency password reset runbook
 ├── env/                         Per-service env.example files
 │   ├── owui.env.example
 │   ├── db.env.example
@@ -225,15 +270,18 @@ open-webui-ultimate-stack/
 │   ├── mcp.env.example
 │   ├── searxng.env.example
 │   ├── tika.env.example
-│   └── tools-init.env.example
+│   ├── tools-init.env.example
+│   └── docling.env.example      Optional heavy document extraction service
 └── README.md
 ```
 
----
+<br>
+
+<br>
 
 ## Configuration
 
-All sensitive values live in `env/` files that are git-ignored. The `.example` variants are tracked and serve as templates.
+All sensitive values live in `env/` files that are git-ignored. The `.example` variants are tracked and serve as templates. `conf/mcposerver/config.json` is also git-ignored — it is generated from `config.json.example` at bootstrap/deploy time with the real Postgres password injected.
 
 ```bash
 # Initial setup (done automatically by bootstrap.sh)
@@ -245,11 +293,13 @@ for f in env/*.env.example; do cp "$f" "${f%.example}"; done
 | `env/owui.env` | Open WebUI — LLM keys, RAG, websocket, TTS, image gen, permissions |
 | `env/db.env` | PostgreSQL credentials |
 | `env/redis.env` | Valkey notes (no required vars) |
-| `env/searxng.env` | SearXNG secret, workers, base URL mode |
+| `env/searxng.env` | SearXNG secret, workers, base URL (`http://localhost:8888/` standalone; `/searxng` Swarm+Traefik) |
 | `env/tika.env` | Tika version tag |
 | `env/edgetts.env` | Default voice, speed, format |
 | `env/mcp.env` | Reference DATABASE_URL for mcpo |
 | `env/tools-init.env` | OWUI API key and URL for tool push |
+
+<br>
 
 **Secrets to generate before starting:**
 
@@ -261,7 +311,9 @@ openssl rand -hex 32
 openssl rand -base64 24
 ```
 
----
+<br>
+
+<br>
 
 ## Deployment
 
@@ -280,8 +332,11 @@ docker compose up -d
 ```
 
 Access:
+
 - Open WebUI → http://localhost:3000
 - SearXNG → http://localhost:8888
+
+<br>
 
 ### Docker Swarm (production)
 
@@ -292,8 +347,12 @@ cp .env.example .env
 # edit .env — set ROUTER_NAME, ROOT_DOMAIN, DATA_ROOT, DB_NODE_HOSTNAME
 for f in env/*.env.example; do cp "$f" "${f%.example}"; done
 # edit env/owui.env, env/db.env, etc. — fill real values
+# For Swarm, set SEARXNG_BASE_URL=/searxng in env/searxng.env
 
 ./scripts/deploy-swarm.sh
+# deploy-swarm.sh creates the overlay network and external volumes, then syncs
+# conf/tools, conf/postgres/init, conf/mcposerver (with password injected),
+# conf/tika, and conf/searxng to DATA_ROOT, then deploys the stack.
 ```
 
 Monitor:
@@ -303,13 +362,40 @@ docker stack ps open-webui
 docker service logs -f open-webui_openwebui
 ```
 
+> **First deploy — tools-init two-phase setup:**
+> On the very first deploy, `tools-init` will fail because no API key exists yet (Open WebUI
+> hasn't been configured). This is expected. After the stack is up:
+>
+> 1. Open Open WebUI, create your admin account
+> 2. Go to Settings > Account > API Keys and generate a key
+> 3. Set `OWUI_API_KEY=<your_key>` in `env/tools-init.env`
+> 4. Force-update the service: `docker service update --force ${STACK_NAME}_tools-init`
+
+<br>
+
 Remove stack:
 
 ```bash
-docker stack rm open-webui
+./scripts/remove-swarm.sh
 ```
 
----
+<br>
+
+<br>
+
+## Credits
+
+The tools, filters, and function pipes bundled in `conf/tools/` were authored primarily by
+**[Haervwe](https://github.com/Haervwe)** from the
+**[open-webui-tools](https://github.com/Haervwe/open-webui-tools)** project.
+
+Additional contributions by:
+[tan-yong-sheng](https://github.com/tan-yong-sheng), pupphelper, Zed Unknown, and justinrahb.
+
+All tools retain their original author metadata in their docstring headers.
+
+
+<br>
 
 ## License
 

@@ -38,4 +38,4 @@ else
 fi
 
 # Wait for the main Postgres process to exit
-wait -n
+wait

@@ -15,21 +15,37 @@ echo " Open WebUI Tools Installer"
 echo " Target: ${API_URL}"
 echo "========================================"
 
-# Wait for Open WebUI to be healthy
+# Phase 1: Wait for Open WebUI to be reachable (unauthenticated health check)
 echo ""
-echo "Waiting for Open WebUI to become ready..."
+echo "Waiting for Open WebUI to become reachable..."
 RETRIES=0
 MAX_RETRIES=60
-until curl -sf -H "Authorization: Bearer ${API_KEY}" "${API_URL}/api/v1/tools/" >/dev/null 2>&1; do
+until curl -sf "${API_URL}/health" >/dev/null 2>&1; do
   RETRIES=$((RETRIES + 1))
   if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
-    echo "ERROR: Open WebUI did not become healthy after ${MAX_RETRIES} attempts. Exiting."
+    echo "ERROR: Open WebUI did not become reachable after ${MAX_RETRIES} attempts. Exiting."
     exit 1
   fi
   echo "  Attempt ${RETRIES}/${MAX_RETRIES} - waiting 5s..."
   sleep 5
 done
-echo "Open WebUI is ready."
+echo "Open WebUI is reachable."
+echo ""
+
+# Phase 2: Verify API key is valid before attempting installs
+echo "Verifying API key..."
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer ${API_KEY}" "${API_URL}/api/v1/tools/")
+if [ "$HTTP_STATUS" = "401" ]; then
+  echo "ERROR: API key rejected (401 Unauthorized)."
+  echo "  Generate a key in Open WebUI: Settings > Account > API Keys"
+  echo "  Then set OWUI_API_KEY in env/tools-init.env and redeploy."
+  exit 1
+elif [ "$HTTP_STATUS" != "200" ]; then
+  echo "ERROR: Unexpected response ${HTTP_STATUS} from Open WebUI API. Exiting."
+  exit 1
+fi
+echo "API key valid."
 echo ""
 
 # Extract title from Python docstring frontmatter
@@ -79,7 +95,7 @@ install_item() {
   if [[ "$http_code" =~ ^2[0-9]{2}$ ]]; then
     echo "OK (${http_code})"
     return 0
-  elif echo "$body" | jq -r '.detail // empty' 2>/dev/null | grep -qi "already\|registered"; then
+  elif echo "$body" | jq . >/dev/null 2>&1 && echo "$body" | jq -r '.detail // empty' 2>/dev/null | grep -qi "already\|registered"; then
     echo "EXISTS — updating..."
     local update_response update_code
     update_response=$(echo "$payload" | curl -s -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/id/${id}/update" \
@@ -92,12 +108,22 @@ install_item() {
       return 0
     else
       echo "  UPDATE FAILED (${update_code})"
-      echo "$update_response" | sed '$d' | jq -r '.detail // .' 2>/dev/null || true
+      local update_body
+      update_body=$(echo "$update_response" | sed '$d')
+      if echo "$update_body" | jq . >/dev/null 2>&1; then
+        echo "$update_body" | jq -r '.detail // .' 2>/dev/null || true
+      else
+        echo "$update_body"
+      fi
       return 1
     fi
   else
     echo "FAILED (${http_code})"
-    echo "$body" | jq -r '.detail // .' 2>/dev/null || echo "$body"
+    if echo "$body" | jq . >/dev/null 2>&1; then
+      echo "$body" | jq -r '.detail // .' 2>/dev/null
+    else
+      echo "$body"
+    fi
     return 1
   fi
 }
