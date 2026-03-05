@@ -20,7 +20,7 @@ echo ""
 echo "Waiting for Open WebUI to become reachable..."
 RETRIES=0
 MAX_RETRIES=60
-until curl -sf "${API_URL}/health" >/dev/null 2>&1; do
+until curl -sf --max-time 10 "${API_URL}/health" >/dev/null 2>&1; do
   RETRIES=$((RETRIES + 1))
   if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
     echo "ERROR: Open WebUI did not become reachable after ${MAX_RETRIES} attempts. Exiting."
@@ -34,7 +34,7 @@ echo ""
 
 # Phase 2: Verify API key is valid before attempting installs
 echo "Verifying API key..."
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+HTTP_STATUS=$(curl -s --max-time 30 -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer ${API_KEY}" "${API_URL}/api/v1/tools/")
 if [ "$HTTP_STATUS" = "401" ]; then
   echo "ERROR: API key rejected (401 Unauthorized)."
@@ -84,7 +84,7 @@ install_item() {
     '{id: $id, name: $name, content: $content, meta: {description: $desc}}')
 
   local response http_code body
-  response=$(echo "$payload" | curl -s -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/create" \
+  response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/create" \
     -H "Authorization: Bearer ${API_KEY}" \
     -H "Content-Type: application/json" \
     -d @- 2>&1)
@@ -98,7 +98,7 @@ install_item() {
   elif echo "$body" | jq . >/dev/null 2>&1 && echo "$body" | jq -r '.detail // empty' 2>/dev/null | grep -qi "already\|registered"; then
     echo "EXISTS — updating..."
     local update_response update_code
-    update_response=$(echo "$payload" | curl -s -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/id/${id}/update" \
+    update_response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/id/${id}/update" \
       -H "Authorization: Bearer ${API_KEY}" \
       -H "Content-Type: application/json" \
       -d @- 2>&1)

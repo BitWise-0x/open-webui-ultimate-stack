@@ -19,3 +19,10 @@ logs/
 .vscode/
 *.swp
 *.swo
+
+**/.DS_Store
+*.icloud
+.vscode
+__pycache__/
+*.pyc
+node_modules

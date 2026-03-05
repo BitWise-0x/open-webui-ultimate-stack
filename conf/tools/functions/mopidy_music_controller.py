@@ -1,0 +1,1147 @@
+"""
+title: Mopidy_Music_Controller
+author: Haervwe
+author_url: https://github.com/Haervwe/open-webui-tools
+funding_url: https://github.com/Haervwe/open-webui-tools
+version: 0.7.1
+description: A pipe to control Mopidy music server to play songs from local library or YouTube, manage playlists, and handle various music commands. Requires Mopidy-Iris UI to be installed for the player interface.
+needs a Local and/or a Youtube API endpoint configured in mopidy.
+mopidy repo: https://github.com/mopidy
+"""
+
+import logging
+import json
+from typing import Dict, List, Callable, Awaitable, Optional
+from pydantic import BaseModel, Field
+import aiohttp
+import asyncio
+import re
+import traceback
+from open_webui.constants import TASKS
+from open_webui.main import generate_chat_completions
+from open_webui.models.users import User ,Users
+
+name = "MopidyController"
+
+
+def setup_logger():
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler()
+        handler.set_name(name)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.propagate = False
+    return logger
+
+
+logger = setup_logger()
+
+
+def clean_thinking_tags(message: str) -> str:
+    """Remove various thinking/reasoning tags that LLMs might include in their responses."""
+    pattern = re.compile(
+        r"<(think|thinking|reason|reasoning|thought|Thought|analysis|Analysis)>.*?</\1>"
+        r"|"
+        r"\|begin_of_thought\|.*?\|end_of_thought\|",
+        re.DOTALL,
+    )
+    return re.sub(pattern, "", message).strip()
+
+
+EventEmitter = Callable[[dict], Awaitable[None]]
+
+
+class Pipe:
+    __current_event_emitter__: EventEmitter
+    __user__: User
+    __model__: str
+
+    class Valves(BaseModel):
+        Model: str = Field(default="", description="Model tag")
+        Mopidy_URL: str = Field(
+            default="http://localhost:6680/mopidy/rpc",
+            description="URL for the Mopidy JSON-RPC API endpoint (requires Iris UI installed)",
+        )
+        YouTube_API_Key: str = Field(
+            default="", description="YouTube Data API key for search",
+            json_schema_extra={"input": {"type": "password"}},
+        )
+        Temperature: float = Field(default=0.7, description="Model temperature")
+        Max_Search_Results: int = Field(
+            default=5, description="Maximum number of search results to return"
+        )
+        Request_Timeout: float = Field(
+            default=10.0,
+            description="Timeout in seconds for HTTP requests (YouTube API, Mopidy RPC, etc.)",
+        )
+        Debug_Logging: bool = Field(
+            default=False,
+            description="Enable detailed debug logging for troubleshooting",
+        )
+        system_prompt: str = Field(
+            default=(
+                "Extract music commands as JSON. Output ONLY this format:\n"
+                '{"action": "ACTION", "parameters": {"query": "SEARCH_TERMS"}}\n\n'
+                "Valid actions: play_song, play_playlist, pause, resume, skip, show_current_song\n\n"
+                "MANDATORY RULES:\n"
+                "- Parameters MUST have 'query' field ONLY\n"
+                "- NEVER use 'title', 'artist', or 'playlist_name' fields\n"
+                "- Remove filler words from query: play, some, songs, music, tracks, by, the, a, an\n"
+                "- Keep only essential terms: artist names, song titles, album names\n\n"
+                "EXAMPLES (input → output):\n"
+                'play some Parov Stelar songs → {"action": "play_playlist", "parameters": {"query": "Parov Stelar"}}\n'
+                'play Booty Swing by Parov Stelar → {"action": "play_song", "parameters": {"query": "Booty Swing Parov Stelar"}}\n'
+                'play The Princess album → {"action": "play_playlist", "parameters": {"query": "Princess"}}\n'
+                'pause → {"action": "pause", "parameters": {}}\n\n'
+                "Output JSON only. No explanations, no thinking, no extra fields."
+            ),
+            description="System prompt for request analysis",
+        )
+
+    def __init__(self):
+        self.valves = self.Valves()
+        self.playlists = {}
+
+    def pipes(self) -> List[Dict[str, str]]:
+        return [{"id": f"{name}-pipe", "name": f"{name} Pipe"}]
+
+    async def emit_message(self, message: str):
+        await self.__current_event_emitter__(
+            {"type": "message", "data": {"content": message}}
+        )
+
+    async def emit_status(self, level: str, message: str, done: bool):
+        await self.__current_event_emitter__(
+            {
+                "type": "status",
+                "data": {
+                    "status": ("complete" if done else "in_progress"),
+                    "level": level,
+                    "description": message,
+                    "done": done,
+                },
+            },
+        )
+
+    async def emit_player(self):
+        """Emit the Iris player HTML as an embed."""
+        iris_available = await self.check_iris_available()
+        if not iris_available:
+            await self.emit_message("⚠️ Iris UI is not available. Please install Mopidy-Iris to use the music player.")
+            if self.valves.Debug_Logging:
+                logger.warning("Iris UI not available - player cannot be displayed")
+            return
+        
+        html_code = await self.generate_iris_embed()
+        if self.valves.Debug_Logging:
+            logger.debug("Using Iris UI for player")
+        
+        if html_code:
+            await self.__current_event_emitter__(
+                {
+                    "type": "embeds",
+                    "data": {
+                        "embeds": [html_code],
+                    },
+                }
+            )
+
+    async def check_iris_available(self) -> bool:
+        """Check if Iris web UI is available."""
+        try:
+            iris_url = self.valves.Mopidy_URL.replace("/mopidy/rpc", "/iris")
+            timeout = aiohttp.ClientTimeout(total=5.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(iris_url) as response:
+                    available = response.status == 200
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Iris UI available at {iris_url}: {available}")
+                    return available
+        except Exception as e:
+            if self.valves.Debug_Logging:
+                logger.debug(f"Iris UI not available: {e}")
+            return False
+
+    async def generate_iris_embed(self) -> str:
+        """Generate an iframe embed for Iris UI."""
+        # Get base URL for proper iframe embedding
+        base_url = self.valves.Mopidy_URL.rsplit("/mopidy", 1)[0]
+        iris_full_url = f"{base_url}/iris"
+        
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Mopidy Iris Player</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            background: #000;
+            overflow: hidden;
+            height: 100vh;
+        }}
+        iframe {{
+            width: 100%;
+            height: 800px;
+            min-height: 800px;
+            border: none;
+        }}
+    </style>
+</head>
+<body>
+    <iframe src="{iris_full_url}" allow="autoplay; clipboard-write" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+</body>
+</html>"""
+        return html
+
+    async def search_local_playlists(self, query: str) -> Optional[List[Dict]]:
+        """Search for playlists in the local Mopidy library."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Searching local playlists for query: {query}")
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.playlists.as_list",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.valves.Mopidy_URL, json=payload
+                ) as response:
+                    result = await response.json()
+                    playlists = result.get("result", [])
+                    matching_playlists = [
+                        pl for pl in playlists if query.lower() in pl["name"].lower()
+                    ]
+                    if matching_playlists:
+                        if self.valves.Debug_Logging:
+                            logger.debug(f"Found matching playlists: {matching_playlists}")
+                        return matching_playlists
+            if self.valves.Debug_Logging:
+                logger.debug("No matching playlists found.")
+            return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout searching local playlists after {self.valves.Request_Timeout}s")
+            return None
+        except Exception as e:
+            logger.error(f"Error searching local playlists: {e}")
+            return None
+
+    async def search_local(self, query: str) -> Optional[List[Dict]]:
+        """Search for songs in the local Mopidy library excluding TuneIn radio stations."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Searching local library for query: {query}")
+        try:
+            # Try multiple search strategies
+            search_strategies = [
+                # Strategy 1: Search with individual words across all fields
+                {
+                    "any": query.split(),
+                    "artist": query.split(),
+                },
+                # Strategy 2: Search with full query string
+                {
+                    "any": [query],
+                },
+                # Strategy 3: Artist-specific search with full string
+                {
+                    "artist": [query],
+                },
+            ]
+            
+            all_tracks = []
+            seen_uris = set()
+            
+            for strategy_num, search_params in enumerate(search_strategies, 1):
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "core.library.search",
+                    "params": {
+                        "query": search_params,
+                    },
+                }
+                if self.valves.Debug_Logging:
+                    logger.debug(f"Search strategy {strategy_num} payload: {payload}")
+                
+                timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        self.valves.Mopidy_URL, json=payload
+                    ) as response:
+                        result = await response.json()
+                        if self.valves.Debug_Logging:
+                            logger.debug(f"Strategy {strategy_num} result: {result}")
+                        
+                        tracks = result.get("result", [])
+                        for res in tracks:
+                            for track in res.get("tracks", []):
+                                uri = track["uri"]
+                                if uri.startswith("tunein:") or uri in seen_uris:
+                                    continue
+                                seen_uris.add(uri)
+                                track_info = {
+                                    "uri": uri,
+                                    "name": track.get("name", ""),
+                                    "artists": [
+                                        artist.get("name", "")
+                                        for artist in track.get("artists", [])
+                                    ],
+                                }
+                                all_tracks.append(track_info)
+                
+                # If we found tracks, don't try more strategies
+                if all_tracks:
+                    break
+            
+            if all_tracks:
+                if self.valves.Debug_Logging:
+                    logger.debug(f"Found {len(all_tracks)} local tracks: {all_tracks[:5]}")
+                return all_tracks
+            
+            if self.valves.Debug_Logging:
+                logger.debug("No local tracks found after trying all strategies.")
+            return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout searching local library after {self.valves.Request_Timeout}s")
+            return None
+        except Exception as e:
+            logger.error(f"Error searching local library: {e}")
+            return None
+
+    async def select_best_playlist(
+        self, playlists: List[Dict], query: str
+    ) -> Optional[Dict]:
+        """Use LLM to select the best matching playlist."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Selecting best playlist for query: {query}")
+        playlist_names = [pl["name"] for pl in playlists]
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an AI assistant that selects the best matching playlist name from a given list, "
+                    "based on the user's query. Respond with only the exact playlist name from the list, and no additional text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User query: '{query}'.\n"
+                    f"Playlists: {playlist_names}.\n"
+                    f"Select the best matching playlist name from the list and respond with only that name."
+                ),
+            },
+        ]
+        try:
+            response = await generate_chat_completions(
+                self.__request__,
+                {
+                    "model": self.valves.Model or self.__model__,
+                    "messages": messages,
+                    "temperature": self.valves.Temperature,
+                    "stream": False,
+                },
+                user=self.__user__,
+            )
+            content = response["choices"][0]["message"]["content"].strip()
+            if self.valves.Debug_Logging:
+                logger.debug(f"LLM selected playlist: {content}")
+            cleaned_content = content.replace('"', "").replace("'", "").strip().lower()
+            selected_playlist = None
+            for pl in playlists:
+                if pl["name"].lower() == cleaned_content:
+                    selected_playlist = pl
+                    break
+            if not selected_playlist:
+                for pl in playlists:
+                    if pl["name"].lower() in cleaned_content:
+                        selected_playlist = pl
+                        break
+            if selected_playlist:
+                if self.valves.Debug_Logging:
+                    logger.debug(f"Found matching playlist: {selected_playlist['name']}")
+                return selected_playlist
+            else:
+                if self.valves.Debug_Logging:
+                    logger.debug("LLM selection did not match any playlist names.")
+                return None
+        except Exception as e:
+            logger.error(f"Error selecting best playlist: {e}")
+            return None
+
+    async def search_youtube_with_api(
+        self, query: str, playlist=False
+    ) -> Optional[List[Dict]]:
+        """Search YouTube using the YouTube Data API."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Searching YouTube Data API for query: {query}")
+        try:
+            if not self.valves.YouTube_API_Key:
+                logger.error("YouTube API Key not provided.")
+                return None
+
+            if playlist:
+                search_type = "playlist"
+            else:
+                search_type = "video"
+            api_url = "https://www.googleapis.com/youtube/v3/search"
+            params = {
+                "part": "snippet",
+                "q": query,
+                "maxResults": self.valves.Max_Search_Results,
+                "key": self.valves.YouTube_API_Key,
+                "type": search_type,
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(api_url, params=params) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        logger.error(f"YouTube API error: {data}")
+                        return None
+                    items = data.get("items", [])
+                    tracks = []
+                    for item in items:
+                        snippet = item.get("snippet", {})
+                        if playlist:
+                            playlist_id = item["id"]["playlistId"]
+                            playlist_videos = await self.get_playlist_videos(
+                                playlist_id
+                            )
+                            tracks.extend(playlist_videos)
+                        else:
+                            video_id = item["id"]["videoId"]
+                            uri = f"youtube:video:{video_id}"  # Use Mopidy-YouTube URI format
+                            track_info = {
+                                "uri": uri,
+                                "name": snippet.get("title", ""),
+                                "artists": [snippet.get("channelTitle", "")],
+                            }
+                            tracks.append(track_info)
+                    if tracks:
+                        if self.valves.Debug_Logging:
+                            logger.debug(f"Found YouTube tracks: {tracks}")
+                        return tracks
+            if self.valves.Debug_Logging:
+                logger.debug("No YouTube content found via API.")
+            return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout searching YouTube API after {self.valves.Request_Timeout}s - check internet connection")
+            return None
+        except Exception as e:
+            logger.error(f"Error searching YouTube API: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
+    async def search_youtube_playlists(self, query: str) -> Optional[List[Dict]]:
+        """Search YouTube for playlists."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Searching YouTube for playlists with query: {query}")
+        try:
+            if not self.valves.YouTube_API_Key:
+                logger.error("YouTube API Key not provided.")
+                return None
+
+            api_url = "https://www.googleapis.com/youtube/v3/search"
+            params = {
+                "part": "snippet",
+                "q": query,
+                "maxResults": self.valves.Max_Search_Results,
+                "key": self.valves.YouTube_API_Key,
+                "type": "playlist",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(api_url, params=params) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        logger.error(f"YouTube API error: {data}")
+                        return None
+                    items = data.get("items", [])
+                    playlists = []
+                    for item in items:
+                        snippet = item.get("snippet", {})
+                        playlist_info = {
+                            "id": item["id"]["playlistId"],
+                            "name": snippet.get("title", ""),
+                            "description": snippet.get("description", ""),
+                        }
+                        playlists.append(playlist_info)
+                    if playlists:
+                        if self.valves.Debug_Logging:
+                            logger.debug(f"Found YouTube playlists: {playlists}")
+                        return playlists
+            if self.valves.Debug_Logging:
+                logger.debug("No YouTube playlists found.")
+            return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout searching YouTube playlists after {self.valves.Request_Timeout}s - check internet connection")
+            return None
+        except Exception as e:
+            logger.error(f"Error searching YouTube playlists: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
+    async def get_playlist_tracks(self, uri: str) -> Optional[List[Dict]]:
+        """Get tracks from the specified playlist URI."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Fetching tracks from playlist URI: {uri}")
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.playlists.get_items",
+                "params": {"uri": uri},
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.valves.Mopidy_URL, json=payload
+                ) as response:
+                    result = await response.json()
+                    tracks = result.get("result", [])
+                    if tracks:
+                        track_info_list = []
+                        for item in tracks:
+                            track_info = {
+                                "uri": item.get("uri"),
+                                "name": item.get("name", ""),
+                                "artists": [],
+                            }
+                            track_info_list.append(track_info)
+                        if self.valves.Debug_Logging:
+                            logger.debug(f"Tracks in playlist: {track_info_list}")
+                        return track_info_list
+            if self.valves.Debug_Logging:
+                logger.debug("No tracks found in playlist.")
+            return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout getting playlist tracks after {self.valves.Request_Timeout}s")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting playlist tracks: {e}")
+            return None
+
+    async def get_playlist_videos(self, playlist_id: str) -> List[Dict]:
+        """Retrieve all videos from a YouTube playlist using the YouTube Data API."""
+        if self.valves.Debug_Logging:
+            logger.debug(f"Fetching videos from playlist ID: {playlist_id}")
+        try:
+            api_url = "https://www.googleapis.com/youtube/v3/playlistItems"
+            params = {
+                "part": "snippet",
+                "playlistId": playlist_id,
+                "maxResults": 50,
+                "key": self.valves.YouTube_API_Key,
+            }
+            tracks = []
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                while True:
+                    async with session.get(api_url, params=params) as resp:
+                        data = await resp.json()
+                        if resp.status != 200:
+                            logger.error(f"YouTube API error: {data}")
+                            break
+                        items = data.get("items", [])
+                        for item in items:
+                            snippet = item.get("snippet", {})
+                            video_id = snippet["resourceId"]["videoId"]
+                            uri = f"youtube:video:{video_id}"  # Use Mopidy-YouTube URI format
+                            track_info = {
+                                "uri": uri,
+                                "name": snippet.get("title", ""),
+                                "artists": [snippet.get("channelTitle", "")],
+                            }
+                            tracks.append(track_info)
+                        if "nextPageToken" in data:
+                            params["pageToken"] = data["nextPageToken"]
+                        else:
+                            break
+            if self.valves.Debug_Logging:
+                logger.debug(f"Total videos fetched from playlist: {len(tracks)}")
+            return tracks
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout fetching playlist videos after {self.valves.Request_Timeout}s - check internet connection")
+            return []
+        except Exception as e:
+            logger.error(f"Error fetching playlist videos: {e}")
+            logger.error(traceback.format_exc())
+            return []
+
+    async def search_youtube(self, query: str, playlist=False) -> Optional[List[Dict]]:
+        """Search YouTube for the song or playlist."""
+        return await self.search_youtube_with_api(query, playlist)
+
+    async def play_uris(self, tracks: List[Dict]):
+        """Play a list of tracks in Mopidy."""
+        uris = [track["uri"] for track in tracks]
+        if self.valves.Debug_Logging:
+            logger.debug(f"Playing URIs: {uris}")
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                clear_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "core.tracklist.clear",
+                }
+                async with session.post(self.valves.Mopidy_URL, json=clear_payload) as response:
+                    result = await response.json()
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Response for core.tracklist.clear: {result}")
+                
+                add_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "core.tracklist.add",
+                    "params": {"uris": uris},
+                }
+                async with session.post(self.valves.Mopidy_URL, json=add_payload) as response:
+                    result = await response.json()
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Response for core.tracklist.add: {result}")
+
+                    added_tracks = result.get("result", [])
+                    if not added_tracks:
+                        logger.error("No tracks were added to tracklist - URIs may be invalid")
+                        return False
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Successfully added {len(added_tracks)} tracks to tracklist")
+
+                first_tlid = added_tracks[0]['tlid']
+                play_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "core.playback.play",
+                    "params": {"tlid": first_tlid},
+                }
+                play_timeout = aiohttp.ClientTimeout(total=15.0) 
+                async with aiohttp.ClientSession(timeout=play_timeout) as play_session:
+                    async with play_session.post(self.valves.Mopidy_URL, json=play_payload) as response:
+                        result = await response.json()
+                        if self.valves.Debug_Logging:
+                            logger.debug(f"Response for core.playback.play (tlid={first_tlid}): {result}")
+                
+                await asyncio.sleep(0.5)
+                state_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "core.playback.get_state",
+                }
+                async with session.post(self.valves.Mopidy_URL, json=state_payload) as response:
+                    result = await response.json()
+                    state = result.get("result")
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Playback state after play command: {state}")
+                
+                current_track_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "core.playback.get_current_tl_track",
+                }
+                async with session.post(self.valves.Mopidy_URL, json=current_track_payload) as response:
+                    result = await response.json()
+                    current_tl_track = result.get("result")
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Current TL track: {current_tl_track}")
+                    
+                    if state != "playing":
+                        logger.warning(f"Playback did not start - state is '{state}' instead of 'playing'")
+                        if current_tl_track:
+                            logger.info(f"Current track according to Mopidy: {current_tl_track}")
+                        logger.info("First track may be unavailable, attempting to skip to next track...")
+                        
+                        for attempt in range(3):
+                            skip_payload = {
+                                "jsonrpc": "2.0",
+                                "id": 6 + attempt,
+                                "method": "core.playback.next",
+                            }
+                            async with session.post(self.valves.Mopidy_URL, json=skip_payload) as response:
+                                skip_result = await response.json()
+                                if self.valves.Debug_Logging:
+                                    logger.debug(f"Skip command result: {skip_result}")
+                            
+                            await asyncio.sleep(1.0)
+                            
+                            async with session.post(self.valves.Mopidy_URL, json=current_track_payload) as response:
+                                result = await response.json()
+                                current_tl_track = result.get("result")
+                                if self.valves.Debug_Logging:
+                                    logger.debug(f"Current TL track after skip {attempt + 1}: {current_tl_track}")
+                            
+                            async with session.post(self.valves.Mopidy_URL, json=state_payload) as response:
+                                result = await response.json()
+                                state = result.get("result")
+                                if self.valves.Debug_Logging:
+                                    logger.debug(f"Playback state after skip attempt {attempt + 1}: {state}")
+                                
+                                if state == "playing":
+                                    logger.info(f"Successfully started playback on track {attempt + 2}")
+                                    return True
+                        
+                        logger.error(f"Playback failed to start after trying {3} tracks - all may be unavailable")
+                        logger.error("This may be due to: YouTube videos being geo-restricted, age-restricted, or unavailable")
+                        logger.error("Check Mopidy logs for more details: sudo journalctl -u mopidy -f")
+                        return False
+            
+            return True
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout playing URIs after {self.valves.Request_Timeout}s")
+            return False
+        except Exception as e:
+            logger.error(f"Error playing URIs: {e}")
+            return False
+
+    async def analyze_request(self, user_input: str) -> Dict:
+        """
+        Extract the command and parameters from the user's request.
+        """
+        if self.valves.Debug_Logging:
+            logger.debug(f"Analyzing user input: {user_input}")
+        command_mapping = {
+            "stop": "pause",
+            "halt": "pause",
+            "play": "play",
+            "start": "play",
+            "resume": "resume",
+            "continue": "resume",
+            "next": "skip",
+            "skip": "skip",
+            "pause": "pause",
+        }
+        user_command = user_input.lower().strip()
+        if user_command in command_mapping:
+            action = command_mapping[user_command]
+            analysis = {"action": action, "parameters": {}}
+            if self.valves.Debug_Logging:
+                logger.debug(f"Directly parsed simple command: {analysis}")
+            return analysis
+        else:
+            try:
+                messages = [
+                    {"role": "system", "content": self.valves.system_prompt},
+                    {"role": "user", "content": user_input},
+                ]
+                response = await generate_chat_completions(
+                    self.__request__,
+                    {
+                        "model": self.valves.Model or self.__model__,
+                        "messages": messages,
+                        "temperature": self.valves.Temperature,
+                        "stream": False,
+                    },
+                    user=self.__user__,
+                )
+
+                content = response["choices"][0]["message"]["content"]
+                if self.valves.Debug_Logging:
+                    logger.debug(f"LLM response (raw): {content}")
+                content = clean_thinking_tags(content)
+                if self.valves.Debug_Logging:
+                    logger.debug(f"LLM response (cleaned): {content}")
+                try:
+                    match = re.search(r"\{[\s\S]*\}", content)
+                    if match:
+                        content = match.group(0)
+                    else:
+                        raise ValueError(
+                            "No JSON object found in the assistant's response."
+                        )
+                    analysis = json.loads(content)
+                    if "type" in analysis:
+                        analysis["action"] = analysis.pop("type")
+                    
+                    if "title" in analysis.get("parameters", {}):
+                        title = analysis["parameters"].pop("title", "")
+                        artist = analysis["parameters"].pop("artist", "")
+                        analysis["parameters"]["query"] = f"{title} {artist}".strip()
+                    elif "artist" in analysis.get("parameters", {}):
+                        analysis["parameters"]["query"] = analysis["parameters"].pop("artist")
+                    elif "playlist_name" in analysis.get("parameters", {}):
+                        analysis["parameters"]["query"] = analysis["parameters"].pop("playlist_name")
+                    
+                    action_aliases = {
+                        "playlist": "play_playlist",
+                        "song": "play_song",
+                        "album": "play_playlist",
+                        "stop": "pause",
+                        "play": "play",
+                    }
+                    if analysis.get("action") in action_aliases:
+                        analysis["action"] = action_aliases[analysis["action"]]
+
+                    if "action" not in analysis:
+                        analysis["action"] = "play_song"
+                        analysis["parameters"] = {"query": user_input}
+                    elif "parameters" not in analysis:
+                        analysis["parameters"] = {}
+
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Request analysis: {analysis}")
+                    return analysis
+
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(
+                        f"Failed to parse LLM response as JSON: {content}. Error: {e}"
+                    )
+                    logger.debug(
+                        "Defaulting to 'play_song' action with the entire input as query."
+                    )
+                    return {"action": "play_song", "parameters": {"query": user_input}}
+
+            except Exception as e:
+                logger.error(f"Error in analyze_request: {e}")
+                logger.debug(
+                    "Defaulting to 'play_song' action with the entire input as query due to exception."
+                )
+                return {"action": "play_song", "parameters": {"query": user_input}}
+
+    async def handle_command(self, analysis: Dict):
+        """Handle the command extracted from the analysis."""
+        action = analysis.get("action")
+        parameters = analysis.get("parameters", {})
+        query = parameters.get("query", "").strip()
+
+        if action == "play_song":
+            if not query:
+                await self.emit_message("Please specify a song to play.")
+                await self.emit_status("error", "No song specified", True)
+                return
+            
+            await self.emit_status(
+                "info", f"Searching for '{query}' in local library...", False
+            )
+            tracks = await self.search_local(query)
+            if tracks:
+                await self.play_uris(tracks)
+
+                await asyncio.sleep(0.5)
+
+                track_names = ", ".join(
+                    [f"{t['name']} by {t['artists'][0]}" for t in tracks[:3]]
+                )
+                await self.emit_message(
+                    f"Playing from local library: {track_names}..."
+                )
+                await self.emit_player()
+                await self.emit_status("success", "Playback started", True)
+                return
+
+            await self.emit_status(
+                "info", f"Not found locally. Searching YouTube for '{query}'...", False
+            )
+            tracks = await self.search_youtube(query)
+            if tracks:
+                track = tracks[0]
+                await self.play_uris([track])
+                await asyncio.sleep(0.5)
+                await self.emit_message(
+                    f"Playing '{track['name']}' by {track['artists'][0]} from YouTube."
+                )
+                await self.emit_player()
+                await self.emit_status("success", "Playback started", True)
+                return
+            else:
+                await self.emit_message(
+                    f"No matching content found for '{query}'. "
+                    "This could be due to no internet connection or YouTube API issues."
+                )
+                await self.emit_status("error", "No results found", True)
+            return
+
+        elif action == "play_playlist":
+            if not query:
+                await self.emit_message("Please specify a playlist to play.")
+                await self.emit_status("error", "No playlist specified", True)
+                return
+
+            await self.emit_status(
+                "info", f"Searching for playlist '{query}' in local library...", False
+            )
+            playlists = await self.search_local_playlists(query)
+            if playlists:
+                best_playlist = await self.select_best_playlist(playlists, query)
+                if best_playlist:
+                    tracks = await self.get_playlist_tracks(best_playlist["uri"])
+                    if tracks:
+                        play_success = await self.play_uris(tracks)
+                        if play_success:
+                            await self.emit_message(
+                                f"Now playing playlist '{best_playlist['name']}' from local library."
+                            )
+                            await self.emit_player()
+                            await self.emit_status("success", "Playback started", True)
+                        else:
+                            await self.emit_message("Failed to play playlist.")
+                            await self.emit_status("error", "Playback failed", True)
+                    else:
+                        await self.emit_message(
+                            f"No tracks found in playlist '{best_playlist['name']}'."
+                        )
+                        await self.emit_status("error", "No tracks in playlist", True)
+                else:
+                    await self.emit_message(
+                        "Could not determine the best playlist to play."
+                    )
+                    await self.emit_status("error", "Playlist selection failed", True)
+                return
+
+            await self.emit_status(
+                "info", f"No playlists found. Searching for local tracks matching '{query}'...", False
+            )
+            tracks = await self.search_local(query)
+            if tracks:
+                play_success = await self.play_uris(tracks)
+                if play_success:
+                    track_names = ", ".join(
+                        [f"{t['name']} by {', '.join(t['artists'])}" for t in tracks[:3]]
+                    )
+                    await self.emit_message(
+                        f"Now playing from local library: {track_names}{'...' if len(tracks) > 3 else ''}"
+                    )
+                    await self.emit_player()
+                    await self.emit_status("success", "Playback started", True)
+                else:
+                    await self.emit_message("Failed to play tracks.")
+                    await self.emit_status("error", "Playback failed", True)
+                return
+
+            await self.emit_status(
+                "info",
+                f"Not found locally. Searching YouTube for playlist '{query}'...",
+                False,
+            )
+            playlists = await self.search_youtube_playlists(query)
+            if playlists:
+                best_playlist = await self.select_best_playlist(playlists, query)
+                if best_playlist:
+                    tracks = await self.get_playlist_videos(best_playlist["id"])
+                    if tracks:
+                        play_success = await self.play_uris(tracks)
+                        if play_success:
+                            await self.emit_message(
+                                f"Now playing YouTube playlist '{best_playlist['name']}'."
+                            )
+                            await self.emit_player()
+                            await self.emit_status("success", "Playback started", True)
+                        else:
+                            await self.emit_message("Failed to play YouTube playlist.")
+                            await self.emit_status("error", "Playback failed", True)
+                    else:
+                        await self.emit_message(
+                            f"No tracks found in YouTube playlist '{best_playlist['name']}'."
+                        )
+                        await self.emit_status("error", "No tracks in playlist", True)
+                else:
+                    await self.emit_message(
+                        "Could not determine the best playlist to play."
+                    )
+                    await self.emit_status("error", "Playlist selection failed", True)
+            else:
+                await self.emit_message(
+                    f"No matching playlist found for '{query}'. "
+                    "This could be due to no internet connection or YouTube API issues."
+                )
+                await self.emit_status("error", "No playlist found", True)
+            return
+
+        elif action == "show_current_song":
+            await self.emit_player()
+            await self.emit_status("success", "Displayed current song", True)
+            return
+
+        elif action == "pause":
+            pause_success = await self.pause()
+            if pause_success:
+                await self.emit_message("Playback paused.")
+                await self.emit_status("success", "Playback paused", True)
+            else:
+                await self.emit_message("Failed to pause playback.")
+                await self.emit_status("error", "Failed to pause", True)
+            return
+
+        elif action == "resume" or action == "play":
+            play_success = await self.play()
+            if play_success:
+                await self.emit_message("Playback resumed.")
+                await self.emit_status("success", "Playback resumed", True)
+            else:
+                await self.emit_message("Failed to resume playback.")
+                await self.emit_status("error", "Failed to resume", True)
+            return
+
+        elif action == "skip":
+            skip_success = await self.skip()
+            if skip_success:
+                await self.emit_message("Skipped to the next track.")
+                await self.emit_status("success", "Skipped track", True)
+            else:
+                await self.emit_message("Failed to skip track.")
+                await self.emit_status("error", "Failed to skip", True)
+            return
+
+        else:
+            await self.emit_message(
+                "Command not recognized. Attempting to play as a song."
+            )
+            new_analysis = {
+                "action": "play_song",
+                "parameters": {"query": query or action},
+            }
+            await self.handle_command(new_analysis)
+            return
+
+    async def get_current_track_info(self) -> Dict:
+        """Get the current track playing."""
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.playback.get_current_track",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.valves.Mopidy_URL, json=payload
+                ) as response:
+                    result = await response.json()
+                    track = result.get("result", {})
+                    return track if track else {}
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout getting current track info after {self.valves.Request_Timeout}s")
+            return {}
+        except Exception as e:
+            logger.error(f"Error getting current track: {e}")
+            return {}
+
+    async def play(self):
+        """Resume playback."""
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.playback.play",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.valves.Mopidy_URL, json=payload
+                ) as response:
+                    result = await response.json()
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Response for play: {result}")
+            return True
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout resuming playback after {self.valves.Request_Timeout}s")
+            return False
+        except Exception as e:
+            logger.error(f"Error resuming playback: {e}")
+            return False
+
+    async def pause(self):
+        """Pause playback."""
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.playback.pause",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.valves.Mopidy_URL, json=payload
+                ) as response:
+                    result = await response.json()
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Response for pause: {result}")
+            return True
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout pausing playback after {self.valves.Request_Timeout}s")
+            return False
+        except Exception as e:
+            logger.error(f"Error pausing playback: {e}")
+            return False
+
+    async def skip(self):
+        """Skip to the next track."""
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.playback.next",
+            }
+            timeout = aiohttp.ClientTimeout(total=self.valves.Request_Timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.valves.Mopidy_URL, json=payload
+                ) as response:
+                    result = await response.json()
+                    if self.valves.Debug_Logging:
+                        logger.debug(f"Response for skip: {result}")
+            return True
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout skipping track after {self.valves.Request_Timeout}s")
+            return False
+        except Exception as e:
+            logger.error(f"Error skipping track: {e}")
+            return False
+
+    async def pipe(
+        self,
+        body: dict,
+        __user__: dict,
+        __event_emitter__=None,
+        __task__=None,
+        __model__=None,
+        __request__=None,
+    ) -> str:
+        """Main pipe function to process music requests."""
+        self.__current_event_emitter__ = __event_emitter__
+        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__model__ = self.valves.Model or __model__
+        self.__request__ = __request__
+        if self.valves.Debug_Logging:
+            logger.debug(__task__)
+        if __task__ and __task__ != TASKS.DEFAULT:
+            response = await generate_chat_completions(
+                self.__request__,
+                {
+                    "model": self.__model__,
+                    "messages": body.get("messages"),
+                    "stream": False,
+                },
+                user=self.__user__,
+            )
+            return f"{name}: {response['choices'][0]['message']['content']}"
+
+        user_input = body.get("messages", [])[-1].get("content", "").strip()
+        if self.valves.Debug_Logging:
+            logger.debug(f"User input: {user_input}")
+
+        try:
+            await self.emit_status("info", "Analyzing your request...", False)
+            analysis = await self.analyze_request(user_input)
+            if self.valves.Debug_Logging:
+                logger.debug(f"Analysis result: {analysis}")
+            await self.handle_command(analysis)
+
+        except Exception as e:
+            logger.error(f"Error processing music request: {e}")
+            await self.emit_message(f"An error occurred: {str(e)}")
+            await self.emit_status("error", f"Error: {str(e)}", True)
+
+        return ""

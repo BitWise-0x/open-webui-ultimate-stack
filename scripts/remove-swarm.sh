@@ -17,6 +17,7 @@ else
 fi
 
 : "${STACK_NAME:?STACK_NAME must be set in .env}"
+: "${BACKEND_NETWORK_NAME:?BACKEND_NETWORK_NAME must be set in .env}"
 
 echo "[*] Removing stack ${STACK_NAME}..."
 docker stack rm "${STACK_NAME}"

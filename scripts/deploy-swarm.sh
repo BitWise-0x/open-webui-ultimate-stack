@@ -85,8 +85,27 @@ mkdir -p "$MCP_DST"
 rsync -av "$MCP_SRC/" "$MCP_DST/"
 # Always regenerate config.json from example so password rotation is always applied
 cp "${MCP_DST}/config.json.example" "${MCP_DST}/config.json"
-sed -i "s|postgresql://postgres:change_me@|postgresql://postgres:${POSTGRES_PASSWORD}@|g" \
-  "${MCP_DST}/config.json"
+# Inject postgres password — Python handles all special characters safely, idempotent on re-deploy.
+# Uses rfind('@') to locate the userinfo/host boundary, so passwords containing '@' are handled correctly.
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" python3 -c "
+import json, os, sys
+path = sys.argv[1]
+pw = os.environ['POSTGRES_PASSWORD']
+with open(path) as f:
+    data = json.load(f)
+def patch(obj):
+    if isinstance(obj, dict): return {k: patch(v) for k, v in obj.items()}
+    if isinstance(obj, list): return [patch(v) for v in obj]
+    if isinstance(obj, str) and obj.startswith('postgresql://'):
+        at = obj.rfind('@')
+        if at != -1:
+            after = obj[at+1:]
+            scheme_user = obj[:at].rsplit(':', 1)[0]
+            return scheme_user + ':' + pw + '@' + after
+    return obj
+with open(path, 'w') as f:
+    json.dump(patch(data), f, indent=2)
+" "${MCP_DST}/config.json"
 echo "[+] mcposerver config synced and password injected"
 
 # Sync conf/tika to DATA_ROOT for the tika container
