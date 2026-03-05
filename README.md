@@ -8,9 +8,9 @@
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/github/license/BitWise-0x/open-webui-ultimate-stack?style=flat-square&color=blue" alt="License"/>
-  <img src="https://img.shields.io/github/last-commit/BitWise-0x/open-webui-ultimate-stack?style=flat-square&color=green" alt="Last Commit"/>
-  <img src="https://img.shields.io/github/repo-size/BitWise-0x/open-webui-ultimate-stack?style=flat-square&color=orange" alt="Repo Size"/>
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"/>
+  <img src="https://img.shields.io/badge/docker-compose_%7C_swarm-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose and Swarm"/>
+  <img src="https://img.shields.io/badge/tools-auto--deployed-4CAF50?style=flat-square" alt="Tools auto-deployed"/>
 </p>
 
 <p align="center">
