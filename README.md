@@ -78,9 +78,11 @@ flowchart TD
 
 <br>
 
-
-
 ## Services
+
+<table>
+<tr>
+<td valign="top">
 
 ### Core
 
@@ -92,6 +94,11 @@ flowchart TD
 - **db**: PostgreSQL 17 with pgvector for vector embeddings and semantic search
 - **redis**: Valkey (Redis-compatible) for WebSocket session management and caching
 
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### Search & Documents
 
 <img src="https://img.shields.io/badge/SearXNG-2025.7.10-EF5350?style=flat-square" alt="SearXNG"/>
@@ -101,6 +108,11 @@ flowchart TD
 - **tika**: Apache Tika with Tesseract OCR for extracting text from PDFs, images, and Office docs; OCR behavior is tunable via `conf/tika/customocr/TesseractOCRConfig.properties`
 - **docling** *(optional)*: heavy document extraction service with advanced layout understanding; enable by uncommenting from the compose file and configuring `env/docling.env`
 
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### AI Integrations
 
 <img src="https://img.shields.io/badge/edge--tts-OpenAI_compatible-4CAF50?style=flat-square" alt="EdgeTTS"/>
@@ -109,17 +121,30 @@ flowchart TD
 - **edgetts**: local text-to-speech server (Microsoft Edge voices, OpenAI-compatible API)
 - **mcposerver**: MCP to OpenAPI proxy; exposes MCP tool servers as REST endpoints consumable by Open WebUI
 
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### Automation
 
 <img src="https://img.shields.io/badge/Python-3.12--slim-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 
 - **tools-init**: one-shot init container; waits for Open WebUI to be healthy, then pushes all tools, filters, and function pipes from `conf/tools/` via the REST API; runs on every deploy with upsert support
 
+</td>
+</tr>
+</table>
+
 <br>
 
 <br>
 
 ## Tools & Extensions
+
+<table>
+<tr>
+<td valign="top">
 
 ### Filters
 
@@ -134,6 +159,11 @@ Pipeline filters that run on every message to pre- or post-process input and out
 - `semantic_router_filter`: routes queries to a configured model based on content
 - `doodle_paint_filter`: injects artistic style directives
 - `openrouter_websearch_citations_filter`: formats and surfaces OpenRouter web search citations
+
+</td>
+</tr>
+<tr>
+<td valign="top">
 
 ### Tools
 
@@ -160,6 +190,11 @@ Native tool-use extensions the model can call during a conversation.
 - `philosopher_api_tool`: philosophical reasoning and quotes
 - `rpg_tool_set`: RPG dice, character generation, and game utilities
 
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### Function Pipes
 
 <img src="https://img.shields.io/badge/function-pipes-9C27B0?style=flat-square" alt="Function Pipes"/>
@@ -175,6 +210,11 @@ Full pipeline functions that replace or augment the model's response loop.
 - `veo3_pipe`: video generation pipeline
 - `resume`: resume analysis and career coaching pipeline
 
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### ComfyUI Workflows (`extras/`)
 
 <img src="https://img.shields.io/badge/ComfyUI-workflows-FF9800?style=flat-square" alt="ComfyUI Workflows"/>
@@ -187,6 +227,10 @@ ComfyUI API workflow JSONs for use with the bundled tools.
 - Vibe Voice TTS (single speaker + multi-speaker)
 - Wan2.1 14B text-to-video
 - Qwen image editing (standard + 2509 API)
+
+</td>
+</tr>
+</table>
 
 <br>
 
