@@ -45,37 +45,9 @@ Open WebUI will be available at **http://localhost:3000** once all containers ar
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    User(["User / Browser"])
-    Traefik(["Traefik\nReverse Proxy"])
-
-    subgraph Stack ["open-webui-ultimate-stack"]
-        direction TB
-
-        OW["openwebui\nghcr.io/open-webui/open-webui:main\n:8080"]
-        DB["db\npgvector/pgvector:pg17\n:5432"]
-        Redis["redis\nvalkey/valkey:8-alpine\n:6379"]
-        SearXNG["searxng\nsearxng/searxng\n:8080"]
-        Tika["tika\napache/tika:full\n:9998"]
-        EdgeTTS["edgetts\nopenai-edge-tts\n:5050"]
-        MCP["mcposerver\nghcr.io/open-webui/mcpo\n:8000"]
-        ToolsInit["tools-init\npython:3.12-slim\none-shot"]
-
-        OW --> DB
-        OW --> Redis
-        OW --> SearXNG
-        OW --> Tika
-        OW --> EdgeTTS
-        OW --> MCP
-        MCP --> DB
-        SearXNG --> Redis
-        ToolsInit -->|"push tools/filters/\nfunctions via API"| OW
-    end
-
-    User --> Traefik --> OW
-    Traefik -.->|"/searxng subpath"| SearXNG
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture diagram" />
+</p>
 
 <br>
 
