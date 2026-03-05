@@ -15,7 +15,8 @@
 
 <p align="center">
   Production-grade Open WebUI deployment with RAG, private web search, OCR, local TTS, and MCP tool servers.<br>
-  Ships as both a standalone <code>docker-compose.yml</code> and a production Docker Swarm <code>docker-stack-compose.yml</code>.
+  Ships as both a standalone <code>docker-compose.yml</code> and a production Docker Swarm <code>docker-stack-compose.yml</code>.<br>
+  Comes pre-loaded with a curated library of tools, filters, and function pipes — automatically slipstreamed into Open WebUI on every deploy.
 </p>
 
 ---
@@ -67,42 +68,6 @@ flowchart TD
 
 ---
 
-## Repository Structure
-
-```
-open-webui-ultimate-stack/
-├── docker-compose.yml           Standalone — local / single-host
-├── docker-stack-compose.yml     Docker Swarm — production
-├── .env.example                 Top-level swarm variables (copy → .env)
-├── .gitignore
-├── bootstrap.sh                 Interactive local startup wizard
-├── scripts/
-│   ├── deploy-swarm.sh          Swarm deploy helper
-│   └── install-tools.sh         Init container: push tools via API
-├── conf/
-│   ├── searxng/                 settings.yml, uwsgi.ini, limiter.toml
-│   ├── tika/                    tika-config.xml + OCR properties
-│   ├── mcposerver/              config.json (MCP server definitions)
-│   ├── postgres/init/           Custom entrypoint + pgvector init
-│   └── tools/
-│       ├── filters/             Python pipeline filters
-│       ├── tools/               Python tool definitions
-│       ├── functions/           Python pipes and functions
-│       └── extras/              ComfyUI API workflow JSONs
-├── env/                         Per-service env.example files
-│   ├── owui.env.example
-│   ├── db.env.example
-│   ├── redis.env.example
-│   ├── edgetts.env.example
-│   ├── mcp.env.example
-│   ├── searxng.env.example
-│   ├── tika.env.example
-│   └── tools-init.env.example
-└── README.md
-```
-
----
-
 ## Services
 
 <table>
@@ -115,7 +80,7 @@ open-webui-ultimate-stack/
 <img src="https://img.shields.io/badge/Valkey-8--alpine-FF4438?style=flat-square&logo=redis&logoColor=white" alt="Valkey"/>
 
 - **openwebui** — full-featured AI chat UI with RAG, tools, pipelines, and multi-model routing
-- **db** — PostgreSQL 17 with pgvector extension for vector embeddings and semantic search
+- **db** — PostgreSQL 17 with pgvector for vector embeddings and semantic search
 - **redis** — Valkey (Redis-compatible) for WebSocket session management and caching
 
 </td>
@@ -146,12 +111,123 @@ open-webui-ultimate-stack/
 ### Automation
 <img src="https://img.shields.io/badge/Python-3.12--slim-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 
-- **tools-init** — one-shot init container that waits for Open WebUI health and pushes all tools, filters, and functions from `conf/tools/` via the internal REST API
-- Supports **filters**, **tools**, and **function pipes** with automatic upsert
+- **tools-init** — one-shot init container that waits for Open WebUI health, then automatically pushes the entire `conf/tools/` library — filters, tools, and function pipes — via the internal REST API with upsert support
+- Re-runs on every deploy; new tools are added, existing ones are updated
 
 </td>
 </tr>
 </table>
+
+---
+
+## Tools & Extensions
+
+Every deploy automatically slipstreams a curated library of tools, pipeline filters, and function pipes directly into Open WebUI — no manual imports, no copy-paste. The `tools-init` container handles it all at startup via the internal API.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Filters
+Pipeline filters that run on every message — pre- or post-process input/output transparently.
+
+- `clean_thinking_tags_filter` — strips `<think>` blocks from model responses
+- `full_document_filter` — injects full document context into the prompt
+- `prompt_enhancer_filter` — rewrites user prompts for sharper results
+- `semantic_router_filter` — intelligently routes queries to the best model
+- `doodle_paint_filter` — injects artistic style directives
+- `openrouter_websearch_citations_filter` — formats and surfaces OpenRouter web search citations
+
+</td>
+<td width="50%" valign="top">
+
+### Tools
+Native tool-use extensions the model can call during a conversation.
+
+- `arxiv_search_tool` — search and retrieve academic papers from arXiv
+- `wiki_search_tool` — Wikipedia search and summary
+- `searxng_image_search_tool` — image search via the local SearXNG instance
+- `comfyui_text_to_image_tool` — text-to-image generation via ComfyUI
+- `comfyui_image_to_image_tool` — image editing and transformation via ComfyUI
+- `comfyui_ace_step_audio_tool` — AI audio generation via ComfyUI
+- `comfyui_vibevoice_tts_tool` — expressive voice TTS via ComfyUI VibeVoice
+- `text_to_video_comfyui_tool` — text-to-video via ComfyUI Wan2.1
+- `youtube_search_tool` — YouTube search and metadata
+- `pexels_image_search_tool` — Pexels royalty-free image search
+- `openweathermap_forecast_tool` — live weather forecasts
+- `native_image_gen` — built-in Open WebUI image generation
+- `create_image_hf` — image generation via Hugging Face Inference API
+- `create_image_cf` — image generation via Cloudflare Workers AI
+- `philosopher_api_tool` — philosophical reasoning and quotes
+- `rpg_tool_set` — RPG dice, character generation, and game utilities
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Function Pipes
+Full pipeline functions that replace or augment the model's response loop.
+
+- `planner` — multi-step task decomposition and planning
+- `multi_model_conversation_v2` — run parallel conversations across multiple models simultaneously
+- `research_pipe` — deep multi-source research pipeline
+- `openrouter_image_pipe` — image generation routing via OpenRouter
+- `flux_kontext_comfyui_pipe` — Flux Kontext image editing pipeline via ComfyUI
+- `veo3_pipe` — video generation pipeline
+- `resume` — resume analysis and career coaching pipeline
+
+</td>
+<td width="50%" valign="top">
+
+### ComfyUI Workflows (`extras/`)
+Pre-built ComfyUI API workflow JSONs ready to drop into your ComfyUI instance for use with the bundled tools.
+
+- Flux Kontext image editing
+- ACE Step audio generation (v1 + v1.5)
+- Vibe Voice TTS (single speaker + multi-speaker)
+- Wan2.1 14B text-to-video
+- Qwen image editing (standard + 2509 API)
+
+</td>
+</tr>
+</table>
+
+---
+
+## Repository Structure
+
+```
+open-webui-ultimate-stack/
+├── docker-compose.yml           Standalone — local / single-host
+├── docker-stack-compose.yml     Docker Swarm — production
+├── .env.example                 Top-level swarm variables (copy → .env)
+├── .gitignore
+├── bootstrap.sh                 Interactive local startup wizard
+├── scripts/
+│   ├── deploy-swarm.sh          Swarm deploy helper
+│   └── install-tools.sh         Init container: auto-push tools via API
+├── conf/
+│   ├── searxng/                 settings.yml, uwsgi.ini, limiter.toml
+│   ├── tika/                    tika-config.xml + OCR properties
+│   ├── mcposerver/              config.json (MCP server definitions)
+│   ├── postgres/init/           Custom entrypoint + pgvector init
+│   └── tools/
+│       ├── filters/             Python pipeline filters (auto-deployed)
+│       ├── tools/               Python tool definitions (auto-deployed)
+│       ├── functions/           Python pipes and functions (auto-deployed)
+│       └── extras/              ComfyUI API workflow JSONs
+├── env/                         Per-service env.example files
+│   ├── owui.env.example
+│   ├── db.env.example
+│   ├── redis.env.example
+│   ├── edgetts.env.example
+│   ├── mcp.env.example
+│   ├── searxng.env.example
+│   ├── tika.env.example
+│   └── tools-init.env.example
+└── README.md
+```
 
 ---
 
@@ -198,7 +274,6 @@ openssl rand -base64 24
 Or manually:
 
 ```bash
-cp .env.example .env               # not required for standalone
 for f in env/*.env.example; do cp "$f" "${f%.example}"; done
 # edit env/owui.env — set WEBUI_SECRET_KEY, OPENAI_API_KEY, etc.
 docker compose up -d
@@ -233,69 +308,6 @@ Remove stack:
 ```bash
 docker stack rm open-webui
 ```
-
----
-
-## Tools & Extensions
-
-The `conf/tools/` directory contains Python tools, filters, and function pipes that are automatically pushed to Open WebUI by the `tools-init` container on each deploy.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### Filters
-- `clean_thinking_tags_filter` — strips `<think>` blocks from responses
-- `full_document_filter` — injects full document context
-- `prompt_enhancer_filter` — rewrites prompts for better results
-- `semantic_router_filter` — routes queries to specialized models
-- `doodle_paint_filter` — artistic style injection
-- `openrouter_websearch_citations_filter` — formats OpenRouter web search citations
-
-</td>
-<td width="50%" valign="top">
-
-### Tools
-- `arxiv_search_tool` — search academic papers on arXiv
-- `wiki_search_tool` — Wikipedia search
-- `searxng_image_search_tool` — image search via local SearXNG
-- `comfyui_text_to_image_tool` — text-to-image via ComfyUI
-- `comfyui_image_to_image_tool` — image editing via ComfyUI
-- `comfyui_ace_step_audio_tool` — AI audio generation via ComfyUI
-- `youtube_search_tool` — YouTube search
-- `pexels_image_search_tool` — Pexels stock images
-- `openweathermap_forecast_tool` — weather forecasts
-- `native_image_gen` — built-in image generation
-- `create_image_hf` — Hugging Face image generation
-- `create_image_cf` — Cloudflare image generation
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### Function Pipes
-- `planner` — multi-step task planning pipeline
-- `multi_model_conversation_v2` — parallel multi-model conversations
-- `research_pipe` — deep research pipeline
-- `openrouter_image_pipe` — image generation via OpenRouter
-- `flux_kontext_comfyui_pipe` — Flux Kontext image editing via ComfyUI
-- `veo3_pipe` — video generation pipeline
-
-</td>
-<td width="50%" valign="top">
-
-### ComfyUI Workflows (`extras/`)
-Pre-built API workflow JSONs for ComfyUI integration:
-- Flux Kontext image editing
-- ACE Step audio generation
-- Vibe Voice TTS (single + multi speaker)
-- Wan2.1 text-to-video
-- Qwen image editing
-
-</td>
-</tr>
-</table>
 
 ---
 
