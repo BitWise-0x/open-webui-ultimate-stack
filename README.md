@@ -15,9 +15,9 @@
 </p>
 
 <p align="center">
-  Production-grade Open WebUI deployment with RAG, private web search, OCR, local TTS, and MCP tool servers.<br>
-  Ships as both a standalone <code>docker-compose.yml</code> and a production Docker Swarm <code>docker-stack-compose.yml</code>.<br>
-  Comes pre-loaded with a curated library of tools, filters, and function pipes — automatically slipstreamed into Open WebUI on every deploy.
+  Open WebUI deployment with RAG, private web search, OCR, local TTS, and MCP tool servers.<br>
+  Ships as both a standalone <code>docker-compose.yml</code> and a Docker Swarm <code>docker-stack-compose.yml</code>.<br>
+  Includes a curated library of tools, filters, and function pipes — pushed into Open WebUI automatically on every deploy via the internal API.
 </p>
 
 <br>
@@ -93,7 +93,7 @@ flowchart TD
 <img src="https://img.shields.io/badge/PostgreSQL-pgvector_pg17-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
 <img src="https://img.shields.io/badge/Valkey-8--alpine-FF4438?style=flat-square&logo=redis&logoColor=white" alt="Valkey"/>
 
-- **openwebui** — full-featured AI chat UI with RAG, tools, pipelines, and multi-model routing
+- **openwebui** — Open WebUI with RAG, tools, pipelines, and multi-model support
 - **db** — PostgreSQL 17 with pgvector for vector embeddings and semantic search
 - **redis** — Valkey (Redis-compatible) for WebSocket session management and caching
 
@@ -130,8 +130,7 @@ flowchart TD
 
 <img src="https://img.shields.io/badge/Python-3.12--slim-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 
-- **tools-init** — one-shot init container that waits for Open WebUI health, then automatically pushes the entire `conf/tools/` library — filters, tools, and function pipes — via the internal REST API with upsert support
-- Re-runs on every deploy; new tools are added, existing ones are updated
+- **tools-init** — one-shot init container; waits for Open WebUI to be healthy, then pushes all tools, filters, and function pipes from `conf/tools/` via the REST API; runs on every deploy with upsert support
 
 </td>
 </tr>
@@ -143,10 +142,6 @@ flowchart TD
 
 ## Tools & Extensions
 
-Every deploy automatically slipstreams a curated library of tools, pipeline filters, and function pipes directly into Open WebUI — no manual imports, no copy-paste. The `tools-init` container handles it all at startup via the internal API.
-
-<br>
-
 <table>
 <tr>
 <td width="50%" valign="top">
@@ -156,12 +151,12 @@ Every deploy automatically slipstreams a curated library of tools, pipeline filt
 <img src="https://img.shields.io/badge/pipeline-filters-EF5350?style=flat-square" alt="Filters"/>
 <img src="https://img.shields.io/badge/count-6-555?style=flat-square" alt="6"/>
 
-Pipeline filters that run on every message — pre- or post-process input/output transparently.
+Pipeline filters that run on every message to pre- or post-process input and output.
 
 - `clean_thinking_tags_filter` — strips `<think>` blocks from model responses
 - `full_document_filter` — injects full document context into the prompt
-- `prompt_enhancer_filter` — rewrites user prompts for sharper results
-- `semantic_router_filter` — intelligently routes queries to the best model
+- `prompt_enhancer_filter` — rewrites user prompts before they reach the model
+- `semantic_router_filter` — routes queries to a configured model based on content
 - `doodle_paint_filter` — injects artistic style directives
 - `openrouter_websearch_citations_filter` — formats and surfaces OpenRouter web search citations
 
@@ -207,7 +202,7 @@ Full pipeline functions that replace or augment the model's response loop.
 
 - `planner` — multi-step task decomposition and planning
 - `multi_model_conversation_v2` — run parallel conversations across multiple models simultaneously
-- `research_pipe` — deep multi-source research pipeline
+- `research_pipe` — multi-source research pipeline
 - `openrouter_image_pipe` — image generation routing via OpenRouter
 - `flux_kontext_comfyui_pipe` — Flux Kontext image editing pipeline via ComfyUI
 - `veo3_pipe` — video generation pipeline
@@ -221,7 +216,7 @@ Full pipeline functions that replace or augment the model's response loop.
 <img src="https://img.shields.io/badge/ComfyUI-workflows-FF9800?style=flat-square" alt="ComfyUI Workflows"/>
 <img src="https://img.shields.io/badge/count-10-555?style=flat-square" alt="10"/>
 
-Pre-built ComfyUI API workflow JSONs ready to drop into your ComfyUI instance for use with the bundled tools.
+ComfyUI API workflow JSONs for use with the bundled tools.
 
 - Flux Kontext image editing
 - ACE Step audio generation (v1 + v1.5)
