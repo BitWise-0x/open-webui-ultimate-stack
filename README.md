@@ -16,8 +16,9 @@
 
 <p align="center">
   <a href="https://openwebui.com">Open WebUI</a> deployment with RAG, private web search, OCR, local TTS, and MCP tool servers.<br>
-  Ships as both a standalone <code>docker-compose.yml</code> and a Docker Swarm <code>docker-stack-compose.yml</code>.<br>
-  Includes a curated library of tools, filters, and function pipes: pushed into <a href="https://openwebui.com">Open WebUI</a> automatically on every deploy via the internal API.
+	Includes a curated library of tools, filters, and function pipes: pushed into <a href="https://openwebui.com">Open WebUI</a> automatically via the internal API.
+  <br>
+  Provides standalone <code>docker-compose.yml</code> and a Docker Swarm <code>docker-stack-compose.yml</code>.
 </p>
 
 <br>
@@ -41,9 +42,40 @@ For additional deployment details, including Docker Swarm, see the [Deployment](
 
 ## Architecture
 
-<p align="center">
-  <img src="docs/architecture.svg" alt="Architecture diagram" />
-</p>
+```mermaid
+graph TD
+    User["👤 User / Browser"]
+
+    subgraph Core
+        owui["<b>openwebui</b><br>ghcr.io/open-webui/open-webui:main<br>:8080 → :3000"]
+        db["<b>db</b><br>pgvector/pgvector:pg17<br>:5432"]
+        redis["<b>redis</b><br>valkey/valkey:8-alpine<br>:6379"]
+    end
+
+    subgraph Search & Documents
+        searxng["<b>searxng</b><br>searxng/searxng<br>:8080 → :8888"]
+        tika["<b>tika</b><br>apache/tika:full<br>:9998"]
+    end
+
+    subgraph AI Integrations
+        edgetts["<b>edgetts</b><br>openai-edge-tts<br>:5050"]
+        mcpo["<b>mcposerver</b><br>ghcr.io/open-webui/mcpo<br>:8000"]
+    end
+
+    subgraph Automation
+        tools["<b>tools-init</b><br>python:3.12-slim<br>one-shot"]
+    end
+
+    User -->|":3000"| owui
+    owui --> db
+    owui --> redis
+    owui --> searxng
+    owui --> tika
+    owui --> edgetts
+    owui --> mcpo
+    searxng --> redis
+    tools -.->|"API push on deploy"| owui
+```
 
 <br>
 
@@ -233,7 +265,6 @@ open-webui-ultimate-stack/
 │       ├── functions/           Python pipes and functions (auto-deployed)
 │       └── extras/              ComfyUI API workflows and sample data
 ├── docs/
-│   ├── architecture.svg            Pre-rendered architecture diagram
 │   └── passwordreset.md            Emergency password reset runbook
 ├── env/                         Per-service env.example files
 │   ├── owui.env.example
