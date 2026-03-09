@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://openwebui.com">Open WebUI</a> deployment with RAG, private web search, OCR, local TTS, and MCP tool servers.<br>
-	Includes a curated library of tools, filters, and function pipes: pushed automatically on every deploy via the internal API.
+	Includes a curated library of tools, filters, and function pipes: pushed automatically on deploy via the internal API.
   <br>
   Provides standalone <code>docker-compose.yml</code> and a Docker Swarm <code>docker-stack-compose.yml</code>.
 </p>
