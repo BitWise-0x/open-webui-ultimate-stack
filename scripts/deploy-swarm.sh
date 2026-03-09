@@ -115,13 +115,20 @@ if [ "${SEARXNG_BASE_URL_VAL}" = "http://localhost:8888/" ]; then
   exit 1
 fi
 
-# Warn if FORWARDED_ALLOW_IPS is still set to standalone default
-FWIP=$(grep '^FORWARDED_ALLOW_IPS=' env/owui.env 2>/dev/null | cut -d= -f2- | tr -d "'\"")
-if [ "${FWIP}" = "127.0.0.1" ]; then
-  echo "[!] WARNING: FORWARDED_ALLOW_IPS is set to 127.0.0.1 (standalone default)"
-  echo "    For Swarm/Traefik, set FORWARDED_ALLOW_IPS=10.0.13.0/24 in env/owui.env"
-  echo "    (must match the overlay subnet created by this script)"
+# Read overlay subnet from owui.env (FORWARDED_ALLOW_IPS is the source of truth)
+# deploy-swarm.sh uses this CIDR to create the overlay network — no hardcoded subnet.
+BACKEND_SUBNET=$(grep '^FORWARDED_ALLOW_IPS=' env/owui.env 2>/dev/null | cut -d= -f2- | tr -d "'\"")
+if [ -z "${BACKEND_SUBNET}" ] || [ "${BACKEND_SUBNET}" = "127.0.0.1" ]; then
+  echo "ERROR: FORWARDED_ALLOW_IPS in env/owui.env is not set to a valid overlay subnet" >&2
+  echo "       The standalone default (127.0.0.1) cannot be used for Swarm." >&2
+  echo "       Set it to the CIDR for the overlay network, e.g.: FORWARDED_ALLOW_IPS=10.0.13.0/24" >&2
+  exit 1
 fi
+if ! echo "${BACKEND_SUBNET}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$'; then
+  echo "ERROR: FORWARDED_ALLOW_IPS='${BACKEND_SUBNET}' does not look like a valid CIDR (expected format: x.x.x.x/n)" >&2
+  exit 1
+fi
+BACKEND_GATEWAY=$(echo "${BACKEND_SUBNET}" | sed 's|\.[0-9]*/.*|.1|')
 
 echo "[*] Stack:          ${STACK_NAME}"
 echo "[*] Backend net:    ${BACKEND_NETWORK_NAME}"
@@ -135,10 +142,10 @@ if docker network inspect "${BACKEND_NETWORK_NAME}" >/dev/null 2>&1; then
 else
   docker network create \
     --driver overlay \
-    --subnet=10.0.13.0/24 \
-    --gateway=10.0.13.1 \
+    --subnet="${BACKEND_SUBNET}" \
+    --gateway="${BACKEND_GATEWAY}" \
     "${BACKEND_NETWORK_NAME}" \
-    || { echo "ERROR: Failed to create network ${BACKEND_NETWORK_NAME} — check for subnet conflicts (10.0.13.0/24)" >&2; exit 1; }
+    || { echo "ERROR: Failed to create network ${BACKEND_NETWORK_NAME} — check for subnet conflicts (${BACKEND_SUBNET})" >&2; exit 1; }
   echo "[+] Created network ${BACKEND_NETWORK_NAME}"
 fi
 

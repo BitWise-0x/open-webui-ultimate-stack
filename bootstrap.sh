@@ -194,6 +194,8 @@ if [ "$SWARM" = true ]; then
     "Set ROOT_DOMAIN in .env to your base domain (used for CORS_ALLOW_ORIGIN and Traefik labels)"
   check_default env/searxng.env SEARXNG_BASE_URL  "http://localhost:8888/" \
     "Set SEARXNG_BASE_URL=http://searxng:8080/ in env/searxng.env for Swarm"
+  check_default env/owui.env FORWARDED_ALLOW_IPS "127.0.0.1" \
+    "Set FORWARDED_ALLOW_IPS to the overlay subnet CIDR in env/owui.env (e.g. 10.0.13.0/24)"
 fi
 
 if [ "$ERRORS" -gt 0 ]; then

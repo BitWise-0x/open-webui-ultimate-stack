@@ -310,7 +310,7 @@ Set these before running:
 | `env/owui.env` | `WEBUI_ADMIN_PASSWORD` | Admin password (uppercase, lowercase, digit, special char, 8+ chars) |
 | `env/owui.env` | `OLLAMA_BASE_URL` | Optional — your Ollama instance URL |
 | `env/owui.env` | `OPENAI_API_KEY` | Optional — your OpenAI API key |
-| `env/owui.env` | `FORWARDED_ALLOW_IPS` | Set to `10.0.13.0/24` for Swarm (must match overlay subnet from `deploy-swarm.sh`) |
+| `env/owui.env` | `FORWARDED_ALLOW_IPS` | Overlay subnet CIDR — `deploy-swarm.sh` uses this to create the network (e.g. `10.0.13.0/24`) |
 | `env/searxng.env` | `SEARXNG_BASE_URL` | Set to `http://searxng:8080/` for Swarm (standalone default `http://localhost:8888/` won't work) |
 
 > **Note:** `WEBUI_ADMIN_EMAIL` and `WEBUI_ADMIN_PASSWORD` must match in both `env/owui.env` and `env/tools-init.env`. `bootstrap.sh --swarm` syncs them automatically whenever the values differ.
