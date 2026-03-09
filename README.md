@@ -26,19 +26,15 @@
 
 ## Quick Start
 
+For single-host / Docker Compose deployments:
+
 ```bash
 git clone https://github.com/BitWise-0x/open-webui-ultimate-stack && cd open-webui-ultimate-stack && ./bootstrap.sh
 ```
 
-The bootstrap script:
-- verifies Docker and Docker Compose v2 are installed
-- copies all `env/*.env.example` files to `env/*.env`
-- generates random `WEBUI_SECRET_KEY`, `SEARXNG_SECRET`, and `POSTGRES_PASSWORD`
-- creates `conf/mcposerver/config.json` from its example and injects the DB password
-- prompts for optional Ollama URL and OpenAI API key (disables each if skipped)
-- runs `docker compose up -d` and prints access URLs
+`bootstrap.sh` copies env examples, generates secrets, validates your configuration, and starts the stack. Open WebUI will be available at **http://localhost:3000**.
 
-Open WebUI will be available at **http://localhost:3000** once all containers are healthy.
+For additional deployment details, including Docker Swarm, see the [Deployment](#deployment) section below.
 
 <br>
 <br>
@@ -78,8 +74,7 @@ Open WebUI will be available at **http://localhost:3000** once all containers ar
 <img src="https://img.shields.io/badge/Apache_Tika-3.2.2.0--full-009688?style=flat-square" alt="Tika"/>
 
 - **searxng**: private metasearch engine aggregating 70+ sources with no tracking
-- **tika**: Apache Tika with Tesseract OCR for extracting text from PDFs, images, and Office docs; OCR behavior is tunable via `conf/tika/customocr/TesseractOCRConfig.properties`
-- **docling** *(optional)*: heavy document extraction service with advanced layout understanding; enable by uncommenting from the compose file and configuring `env/docling.env`
+- **tika**: Apache Tika with Tesseract OCR for extracting text from PDFs, images, and Office docs; OCR behavior is tunable via `conf/tika/customocr/org/apache/tika/parser/ocr/TesseractOCRConfig.properties`
 
 </td>
 </tr>
@@ -196,9 +191,9 @@ Full pipeline functions that replace or augment the model's response loop.
 ### ComfyUI Workflows (`extras/`)
 
 <img src="https://img.shields.io/badge/ComfyUI-workflows-FF9800?style=flat-square" alt="ComfyUI Workflows"/>
-<img src="https://img.shields.io/badge/count-9-555?style=flat-square" alt="9"/>
+<img src="https://img.shields.io/badge/count-10-555?style=flat-square" alt="10"/>
 
-ComfyUI API workflow JSONs for use with the bundled tools.
+ComfyUI API workflows and sample data for use with the bundled tools.
 
 - Flux Kontext image editing
 - ACE Step audio generation (v1 + v1.5)
@@ -222,7 +217,7 @@ open-webui-ultimate-stack/
 ├── docker-stack-compose.yml     Docker Swarm: production
 ├── .env.example                 Top-level swarm variables (copy → .env)
 ├── .gitignore
-├── bootstrap.sh                 Interactive local startup wizard
+├── bootstrap.sh                 Setup, secrets generation, validation, and deployment
 ├── scripts/
 │   ├── deploy-swarm.sh          Swarm deploy helper
 │   ├── remove-swarm.sh          Swarm teardown helper
@@ -231,14 +226,15 @@ open-webui-ultimate-stack/
 │   ├── searxng/                 settings.yml, uwsgi.ini, limiter.toml
 │   ├── tika/                    tika-config.xml + OCR properties
 │   ├── mcposerver/              config.json.example (template; config.json gitignored)
-│   ├── postgres/init/           Custom entrypoint + pgvector init
+│   ├── postgres/init/           Custom entrypoint + pgvector init (entrypoint.sh)
 │   └── tools/
 │       ├── filters/             Python pipeline filters (auto-deployed)
 │       ├── tools/               Python tool definitions (auto-deployed)
 │       ├── functions/           Python pipes and functions (auto-deployed)
-│       └── extras/              ComfyUI API workflow JSONs
+│       └── extras/              ComfyUI API workflows and sample data
 ├── docs/
-│   └── passwordreset.md         Emergency password reset runbook
+│   ├── architecture.svg            Pre-rendered architecture diagram
+│   └── passwordreset.md            Emergency password reset runbook
 ├── env/                         Per-service env.example files
 │   ├── owui.env.example
 │   ├── db.env.example
@@ -247,8 +243,7 @@ open-webui-ultimate-stack/
 │   ├── mcp.env.example
 │   ├── searxng.env.example
 │   ├── tika.env.example
-│   ├── tools-init.env.example
-│   └── docling.env.example      Optional heavy document extraction service
+│   └── tools-init.env.example
 └── README.md
 ```
 
@@ -258,35 +253,16 @@ open-webui-ultimate-stack/
 
 ## Configuration
 
-All sensitive values live in `env/` files that are git-ignored. The `.example` variants are tracked and serve as templates. `conf/mcposerver/config.json` is also git-ignored: it is generated from `config.json.example` at bootstrap/deploy time with the real Postgres password injected.
-
-```bash
-# Initial setup (done automatically by bootstrap.sh)
-for f in env/*.env.example; do cp "$f" "${f%.example}"; done
-```
-
 | File | Purpose |
 |------|---------|
 | `env/owui.env` | Open WebUI: LLM keys, RAG, websocket, TTS, image gen, permissions |
 | `env/db.env` | PostgreSQL credentials |
 | `env/redis.env` | Valkey notes (no required vars) |
-| `env/searxng.env` | SearXNG secret, workers, base URL (`http://localhost:8888/` standalone; `/searxng` Swarm+Traefik) |
+| `env/searxng.env` | SearXNG secret, workers, base URL |
 | `env/tika.env` | Tika version tag |
 | `env/edgetts.env` | Default voice, speed, format |
 | `env/mcp.env` | Reference DATABASE_URL for mcpo |
-| `env/tools-init.env` | OWUI API key and URL for tool push |
-
-<br>
-
-**Secrets to generate before starting:**
-
-```bash
-# WEBUI_SECRET_KEY and SEARXNG_SECRET
-openssl rand -hex 32
-
-# POSTGRES_PASSWORD
-openssl rand -base64 24
-```
+| `env/tools-init.env` | Admin credentials used by tools-init to sign in and push tools on every deploy |
 
 <br>
 
@@ -296,64 +272,77 @@ openssl rand -base64 24
 
 ### Standalone (local / single host)
 
+Set these before running:
+
+| File | Variable | Description |
+|---|---|---|
+| `env/owui.env` | `WEBUI_ADMIN_EMAIL` | Admin account email |
+| `env/owui.env` | `WEBUI_ADMIN_PASSWORD` | Admin password (uppercase, lowercase, digit, special char, 8+ chars) |
+| `env/owui.env` | `OLLAMA_BASE_URL` | Optional — your Ollama instance URL |
+| `env/owui.env` | `OPENAI_API_KEY` | Optional — your OpenAI API key |
+
+> **Note:** `env/tools-init.env` must have matching `OWUI_ADMIN_EMAIL` and `OWUI_ADMIN_PASSWORD` — `bootstrap.sh` syncs them automatically from `env/owui.env` whenever the values differ.
+
+Then run:
+
 ```bash
 ./bootstrap.sh
 ```
 
-Or manually:
-
-```bash
-for f in env/*.env.example; do cp "$f" "${f%.example}"; done
-# edit env/owui.env: set WEBUI_SECRET_KEY, OPENAI_API_KEY, etc.
-docker compose up -d
-```
-
-Access:
-
-- Open WebUI → http://localhost:3000
+`bootstrap.sh` copies env examples, generates all secrets, validates your configuration, syncs credentials to `env/tools-init.env`, and starts the stack. Open WebUI will be available at **http://localhost:3000**.
 
 <br>
 
-### Docker Swarm (production)
+### Docker Swarm
 
-**Prerequisites:** Traefik deployed with `traefik-public` overlay network and `chain-oauth@file` middleware.
+Set these before running:
+
+| File | Variable | Description |
+|---|---|---|
+| `.env` | `STACK_NAME` | Stack name (default: `open-webui`) |
+| `.env` | `DATA_ROOT` | Shared filesystem path on Swarm nodes (GlusterFS, NFS, etc.) |
+| `.env` | `ROUTER_NAME` | Subdomain for CORS and Traefik labels (e.g. `openwebui`) |
+| `.env` | `ROOT_DOMAIN` | Base domain for CORS and Traefik labels (e.g. `yourdomain.com`) |
+| `.env` | `BACKEND_NETWORK_NAME` | Overlay network name (default: `open-webui_backend`) |
+| `.env` | `TIKA_TAG` | Apache Tika version (default: `3.2.2.0`) |
+| `.env` | `REDIS_DATA_ROOT` | Optional — separate high-IOPS mount for Redis data (defaults to `DATA_ROOT`) |
+| `env/owui.env` | `WEBUI_ADMIN_EMAIL` | Admin account email |
+| `env/owui.env` | `WEBUI_ADMIN_PASSWORD` | Admin password (uppercase, lowercase, digit, special char, 8+ chars) |
+| `env/owui.env` | `OLLAMA_BASE_URL` | Optional — your Ollama instance URL |
+| `env/owui.env` | `OPENAI_API_KEY` | Optional — your OpenAI API key |
+| `env/owui.env` | `FORWARDED_ALLOW_IPS` | Set to `10.0.13.0/24` for Swarm (must match overlay subnet from `deploy-swarm.sh`) |
+| `env/searxng.env` | `SEARXNG_BASE_URL` | Set to `http://searxng:8080/` for Swarm (standalone default `http://localhost:8888/` won't work) |
+
+> **Note:** `WEBUI_ADMIN_EMAIL` and `WEBUI_ADMIN_PASSWORD` must match in both `env/owui.env` and `env/tools-init.env`. `bootstrap.sh --swarm` syncs them automatically whenever the values differ.
+
+Then run:
 
 ```bash
-cp .env.example .env
-# edit .env: set ROUTER_NAME, ROOT_DOMAIN, DATA_ROOT, DB_NODE_HOSTNAME
-for f in env/*.env.example; do cp "$f" "${f%.example}"; done
-# edit env/owui.env, env/db.env, etc.: fill real values
-# For Swarm, set SEARXNG_BASE_URL=/searxng in env/searxng.env
-# For Swarm+Traefik, set FORWARDED_ALLOW_IPS=10.0.13.0/24 in env/owui.env
-
-./scripts/deploy-swarm.sh
-# deploy-swarm.sh creates the overlay network and external volumes, then syncs
-# conf/tools, conf/postgres/init, conf/mcposerver (with password injected),
-# conf/tika, and conf/searxng to DATA_ROOT, then deploys the stack.
+./bootstrap.sh --swarm
 ```
+
+`bootstrap.sh --swarm` copies env examples, generates all secrets, validates your configuration, syncs credentials to `env/tools-init.env`, and calls `deploy-swarm.sh` to create the overlay network, external volumes, sync `conf/` to `DATA_ROOT`, and deploy the stack.
+
+`bootstrap.sh --swarm` is safe to re-run on redeploy or update — it re-syncs `conf/` to `DATA_ROOT` and redeploys the stack without touching existing secrets or data volumes.
 
 Monitor:
 
 ```bash
-docker stack ps open-webui
-docker service logs -f open-webui_openwebui
+docker stack ps ${STACK_NAME:-open-webui}
+docker service logs -f ${STACK_NAME:-open-webui}_openwebui
 ```
 
-> **First deploy: tools-init two-phase setup:**
-> On the very first deploy, `tools-init` will fail because no API key exists yet (Open WebUI
-> hasn't been configured). This is expected. After the stack is up:
->
-> 1. Open Open WebUI, create your admin account
-> 2. Go to Settings > Account > API Keys and generate a key
-> 3. Set `OWUI_API_KEY=<your_key>` in `env/tools-init.env`
-> 4. Force-update the service: `docker service update --force ${STACK_NAME}_tools-init`
-
-<br>
-
-Remove stack:
+Remove stack (preserves data volumes by default):
 
 ```bash
 ./scripts/remove-swarm.sh
+```
+
+To also remove data volumes after removal (**destroys all data**):
+
+```bash
+docker volume rm ${STACK_NAME:-open-webui}_postgresdata ${STACK_NAME:-open-webui}_searxngcache
+docker network rm ${BACKEND_NETWORK_NAME:-open-webui_backend}
 ```
 
 <br>

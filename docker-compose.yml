@@ -1,5 +1,3 @@
-version: '3.9'
-
 x-logging:
   &default-logging
   driver: "json-file"
@@ -159,6 +157,12 @@ services:
     env_file: env/edgetts.env
     environment:
       TZ: America/New_York
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:5050/v1/models || exit 1"]
+      interval: 30s
+      retries: 5
+      start_period: 15s
+      timeout: 5s
     networks:
       - backend
     restart: unless-stopped
@@ -192,8 +196,8 @@ services:
       - bash
       - -c
       - |
-        apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1
-        exec bash /scripts/install-tools.sh
+        apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1 \
+          && exec bash /scripts/install-tools.sh
     volumes:
       - ./conf/tools:/tools:ro
       - ./scripts/install-tools.sh:/scripts/install-tools.sh:ro
@@ -202,7 +206,7 @@ services:
     depends_on:
       openwebui:
         condition: service_healthy
-    restart: on-failure
+    restart: "on-failure:5"
     logging: *default-logging
 
 networks:

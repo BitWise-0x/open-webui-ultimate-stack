@@ -19,6 +19,7 @@ fi
 : "${STACK_NAME:?STACK_NAME must be set in .env}"
 : "${BACKEND_NETWORK_NAME:?BACKEND_NETWORK_NAME must be set in .env}"
 
+echo ""
 echo "[*] Removing stack ${STACK_NAME}..."
 docker stack rm "${STACK_NAME}"
 echo "[+] Stack removed."
@@ -27,4 +28,4 @@ echo "    External volumes and networks are NOT removed automatically."
 echo "    To remove volumes (DESTROYS ALL DATA):"
 echo "      docker volume rm ${STACK_NAME}_postgresdata ${STACK_NAME}_searxngcache"
 echo "    To remove the overlay network:"
-echo "      docker network rm \${BACKEND_NETWORK_NAME}"
+echo "      docker network rm ${BACKEND_NETWORK_NAME}"

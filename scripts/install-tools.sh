@@ -7,7 +7,9 @@
 set -euo pipefail
 
 API_URL="${OWUI_API_URL:-http://openwebui:8080}"
-API_KEY="${OWUI_API_KEY:?OWUI_API_KEY env var required}"
+ADMIN_EMAIL="${OWUI_ADMIN_EMAIL:?OWUI_ADMIN_EMAIL env var required}"
+ADMIN_PASSWORD="${OWUI_ADMIN_PASSWORD:?OWUI_ADMIN_PASSWORD env var required}"
+TOKEN=""
 TOOLS_DIR="/tools"
 
 echo "========================================"
@@ -17,35 +19,34 @@ echo "========================================"
 
 # Phase 1: Wait for Open WebUI to be reachable (unauthenticated health check)
 echo ""
-echo "Waiting for Open WebUI to become reachable..."
+echo "Waiting for Open WebUI to become ready..."
 RETRIES=0
 MAX_RETRIES=60
-until curl -sf --max-time 10 "${API_URL}/health" >/dev/null 2>&1; do
+until curl -sf --max-time 10 "${API_URL}/health/db" >/dev/null 2>&1; do
   RETRIES=$((RETRIES + 1))
   if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
-    echo "ERROR: Open WebUI did not become reachable after ${MAX_RETRIES} attempts. Exiting."
+    echo "ERROR: Open WebUI did not become ready after ${MAX_RETRIES} attempts. Exiting."
     exit 1
   fi
   echo "  Attempt ${RETRIES}/${MAX_RETRIES} - waiting 5s..."
   sleep 5
 done
-echo "Open WebUI is reachable."
+echo "Open WebUI is ready."
 echo ""
 
-# Phase 2: Verify API key is valid before attempting installs
-echo "Verifying API key..."
-HTTP_STATUS=$(curl -s --max-time 30 -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer ${API_KEY}" "${API_URL}/api/v1/tools/")
-if [ "$HTTP_STATUS" = "401" ]; then
-  echo "ERROR: API key rejected (401 Unauthorized)."
-  echo "  Generate a key in Open WebUI: Settings > Account > API Keys"
-  echo "  Then set OWUI_API_KEY in env/tools-init.env and redeploy."
-  exit 1
-elif [ "$HTTP_STATUS" != "200" ]; then
-  echo "ERROR: Unexpected response ${HTTP_STATUS} from Open WebUI API. Exiting."
+# Phase 2: Sign in to obtain a fresh bearer token
+echo "Authenticating as ${ADMIN_EMAIL}..."
+SIGNIN_BODY=$(curl -s --max-time 30 -X POST "${API_URL}/api/v1/auths/signin" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg e "$ADMIN_EMAIL" --arg p "$ADMIN_PASSWORD" '{email:$e,password:$p}')")
+
+TOKEN=$(echo "$SIGNIN_BODY" | jq -r '.token // empty' 2>/dev/null)
+if [ -z "$TOKEN" ]; then
+  echo "ERROR: Sign-in failed. Response:"
+  echo "$SIGNIN_BODY" | jq . 2>/dev/null || echo "$SIGNIN_BODY"
   exit 1
 fi
-echo "API key valid."
+echo "Authenticated. Token obtained."
 echo ""
 
 # Extract title from Python docstring frontmatter
@@ -85,7 +86,7 @@ install_item() {
 
   local response http_code body
   response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/create" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
     -d @- 2>&1)
 
@@ -99,7 +100,7 @@ install_item() {
     echo "EXISTS — updating..."
     local update_response update_code
     update_response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/id/${id}/update" \
-      -H "Authorization: Bearer ${API_KEY}" \
+      -H "Authorization: Bearer ${TOKEN}" \
       -H "Content-Type: application/json" \
       -d @- 2>&1)
     update_code=$(echo "$update_response" | tail -1)

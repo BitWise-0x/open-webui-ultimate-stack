@@ -1,5 +1,3 @@
-version: '3.9'
-
 x-logging:
   &default-logging
   driver: "json-file"
@@ -17,10 +15,10 @@ services:
       TZ: America/New_York
       CORS_ALLOW_ORIGIN: https://${ROUTER_NAME}.${ROOT_DOMAIN}
     volumes:
-      - ${DATA_ROOT:-/mnt/data}/open-webui/data:/app/backend/data
+      - ${DATA_ROOT}/open-webui/data:/app/backend/data
     networks:
       - backend
-      - traefik-public
+      # - traefik-public  # uncomment if using Traefik as ingress
     healthcheck:
       test: ["CMD-SHELL", "curl --fail localhost:8080/health || exit 1"]
       interval: 30s
@@ -39,18 +37,20 @@ services:
         max_attempts: 5
         window: 120s
       labels:
-        - traefik.enable=true
-        - traefik.swarm.network=traefik-public
-        - traefik.http.routers.${ROUTER_NAME}.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`)
-        - traefik.http.routers.${ROUTER_NAME}.middlewares=chain-oauth@file
-        - traefik.http.routers.${ROUTER_NAME}.service=${ROUTER_NAME}-svc
-        - traefik.http.services.${ROUTER_NAME}-svc.loadbalancer.server.port=8080
-        - traefik.constraint=traefik-public
+        # Traefik — uncomment and configure if using Traefik as ingress
+        # - traefik.enable=true
+        # - traefik.swarm.network=traefik-public
+        # - traefik.http.routers.${ROUTER_NAME}.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`)
+        # - traefik.http.routers.${ROUTER_NAME}.middlewares=chain-oauth@file
+        # - traefik.http.routers.${ROUTER_NAME}.service=${ROUTER_NAME}-svc
+        # - traefik.http.services.${ROUTER_NAME}-svc.loadbalancer.server.port=8080
+        # - traefik.constraint=traefik-public
     logging: *default-logging
 
   db:
     image: pgvector/pgvector:pg17
-    env_file: env/db.env
+    env_file:
+      - env/db.env
     user: "999:999"
     environment:
       TZ: America/New_York
@@ -64,7 +64,7 @@ services:
       timeout: 10s
     volumes:
       - postgres:/var/lib/postgresql/data
-      - ${DATA_ROOT:-/mnt/data}/open-webui/postgres/init:/init:ro
+      - ${DATA_ROOT}/open-webui/postgres/init:/init:ro
     networks:
       - backend
     deploy:
@@ -74,18 +74,17 @@ services:
         delay: 30s
       restart_policy:
         condition: on-failure
-      placement:
-        constraints:
-          - node.hostname == ${DB_NODE_HOSTNAME:-manager}
+
     logging: *default-logging
 
   redis:
     image: docker.io/valkey/valkey:8-alpine
-    env_file: env/redis.env
+    env_file:
+      - env/redis.env
     environment:
       TZ: America/New_York
     volumes:
-      - ${DATA_ROOT:-/mnt/data}/open-webui/redis/data:/data
+      - ${REDIS_DATA_ROOT:-${DATA_ROOT}}/open-webui/redis/data:/data
     command: "valkey-server --save 30 1"
     healthcheck:
       test: "[ $$(valkey-cli ping) = 'PONG' ]"
@@ -113,7 +112,8 @@ services:
   searxng:
     image: searxng/searxng:2025.7.10-4b9644e
     user: "977:977"
-    env_file: env/searxng.env
+    env_file:
+      - env/searxng.env
     environment:
       TZ: America/New_York
     healthcheck:
@@ -131,12 +131,12 @@ services:
       - ALL
     volumes:
       - searxng:/var/cache/searxng:rw
-      - ${DATA_ROOT:-/mnt/data}/open-webui/searxng/conf/settings.yml:/etc/searxng/settings.yml:ro
-      - ${DATA_ROOT:-/mnt/data}/open-webui/searxng/conf/uwsgi.ini:/etc/searxng/uwsgi.ini:ro
-      - ${DATA_ROOT:-/mnt/data}/open-webui/searxng/conf/limiter.toml:/etc/searxng/limiter.toml:ro
+      - ${DATA_ROOT}/open-webui/searxng/conf/settings.yml:/etc/searxng/settings.yml:ro
+      - ${DATA_ROOT}/open-webui/searxng/conf/uwsgi.ini:/etc/searxng/uwsgi.ini:ro
+      - ${DATA_ROOT}/open-webui/searxng/conf/limiter.toml:/etc/searxng/limiter.toml:ro
     networks:
       - backend
-      - traefik-public
+      # - traefik-public  # uncomment if using Traefik as ingress
     deploy:
       replicas: 1
       update_config:
@@ -145,14 +145,15 @@ services:
       restart_policy:
         condition: on-failure
       labels:
-        - traefik.enable=true
-        - traefik.swarm.network=traefik-public
+        # Traefik — uncomment and configure if using Traefik as ingress
         # SearXNG is served under /searxng — requires SEARXNG_BASE_URL=/searxng in env/searxng.env
-        - traefik.http.routers.searxng.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`) && PathPrefix(`/searxng`)
-        - traefik.http.routers.searxng.middlewares=chain-oauth@file,searxng-stripprefix
-        - traefik.http.middlewares.searxng-stripprefix.stripPrefix.prefixes=/searxng
-        - traefik.http.routers.searxng.service=searxng-svc
-        - traefik.http.services.searxng-svc.loadbalancer.server.port=8080
+        # - traefik.enable=true
+        # - traefik.swarm.network=traefik-public
+        # - traefik.http.routers.searxng.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`) && PathPrefix(`/searxng`)
+        # - traefik.http.routers.searxng.middlewares=chain-oauth@file,searxng-stripprefix
+        # - traefik.http.middlewares.searxng-stripprefix.stripPrefix.prefixes=/searxng
+        # - traefik.http.routers.searxng.service=searxng-svc
+        # - traefik.http.services.searxng-svc.loadbalancer.server.port=8080
     logging:
       driver: "json-file"
       options:
@@ -161,7 +162,8 @@ services:
 
   tika:
     image: apache/tika:${TIKA_TAG:-3.2.2.0}-full
-    env_file: env/tika.env
+    env_file:
+      - env/tika.env
     entrypoint: ["/bin/sh", "-c", "exec java -cp \"/customocr:/tika-server-standard-$${TIKA_VERSION}.jar:/tika-extras/*\" org.apache.tika.server.core.TikaServerCli -h 0.0.0.0 $$0 $$@"]
     command: -c /tika-config.xml
     environment:
@@ -174,8 +176,8 @@ services:
       start_period: 60s
       timeout: 10s
     volumes:
-      - ${DATA_ROOT:-/mnt/data}/open-webui/tika/conf/tika-config.xml:/tika-config.xml
-      - ${DATA_ROOT:-/mnt/data}/open-webui/tika/conf/customocr:/customocr
+      - ${DATA_ROOT}/open-webui/tika/conf/tika-config.xml:/tika-config.xml
+      - ${DATA_ROOT}/open-webui/tika/conf/customocr:/customocr
     networks:
       - backend
     deploy:
@@ -189,7 +191,8 @@ services:
 
   edgetts:
     image: travisvn/openai-edge-tts:latest
-    env_file: env/edgetts.env
+    env_file:
+      - env/edgetts.env
     environment:
       TZ: America/New_York
     healthcheck:
@@ -211,7 +214,8 @@ services:
 
   mcposerver:
     image: ghcr.io/open-webui/mcpo:latest
-    env_file: env/mcp.env
+    env_file:
+      - env/mcp.env
     environment:
       TZ: America/New_York
     command: ["--config", "/app/conf/config.json"]
@@ -222,7 +226,7 @@ services:
       start_period: 60s
       timeout: 10s
     volumes:
-      - ${DATA_ROOT:-/mnt/data}/open-webui/mcposerver/conf:/app/conf:ro
+      - ${DATA_ROOT}/open-webui/mcposerver/conf:/app/conf:ro
     networks:
       - backend
     deploy:
@@ -236,18 +240,19 @@ services:
 
   tools-init:
     image: python:3.12-slim
-    env_file: env/tools-init.env
+    env_file:
+      - env/tools-init.env
     environment:
       TZ: America/New_York
     entrypoint:
       - bash
       - -c
       - |
-        apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1
-        exec bash /scripts/install-tools.sh
+        apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1 \
+          && exec bash /scripts/install-tools.sh
     volumes:
-      - ${DATA_ROOT:-/mnt/data}/open-webui/tools:/tools:ro
-      - ${DATA_ROOT:-/mnt/data}/open-webui/tools/install-tools.sh:/scripts/install-tools.sh:ro
+      - ${DATA_ROOT}/open-webui/tools:/tools:ro
+      - ${DATA_ROOT}/open-webui/tools/install-tools.sh:/scripts/install-tools.sh:ro
     networks:
       - backend
     deploy:
@@ -262,8 +267,8 @@ networks:
   backend:
     name: ${BACKEND_NETWORK_NAME}
     external: true
-  traefik-public:
-    external: true
+  # traefik-public:  # uncomment if using Traefik as ingress
+  #   external: true
 
 volumes:
   postgres:
