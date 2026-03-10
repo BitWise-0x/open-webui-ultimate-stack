@@ -1,6 +1,32 @@
 #!/usr/bin/env bash
-
-# Custom entrypoint - enables vector extension
+# =============================================================================
+# entrypoint.sh — Custom PostgreSQL entrypoint for pgvector extension management
+# =============================================================================
+#
+# This script wraps the official postgres docker-entrypoint.sh to ensure the
+# pgvector (vector) extension is created and kept up to date on every container
+# start. It is designed for Docker Swarm where containers may be rescheduled.
+#
+# What it does:
+#   1. Removes stale postmaster.pid (safe for Swarm rescheduling after crash)
+#   2. Starts the official docker-entrypoint.sh in the background
+#   3. Waits for PostgreSQL to accept connections (up to 300s)
+#   4. Creates the 'vector' extension if it doesn't exist
+#   5. Upgrades the 'vector' extension to match the installed shared library
+#   6. Forwards SIGTERM/SIGINT/SIGQUIT to the postgres process
+#
+# Mount path (compose):
+#   ${DATA_ROOT}/open-webui/postgres/init:/init:ro
+#
+# Compose entrypoint:
+#   entrypoint: ["/init/entrypoint.sh"]
+#   command: ["postgres"]
+#
+# Environment variables (from env/db.env):
+#   POSTGRES_DB        Database name (default: openwebui)
+#   POSTGRES_USER      Database user (default: postgres)
+#   POSTGRES_PASSWORD  Database password
+# =============================================================================
 
 set -e
 
@@ -55,6 +81,12 @@ if ! psql -h localhost -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 else
   echo "[init] 'pgvector' extension already enabled 👍"
 fi
+
+# Upgrade extension to match the installed shared library version.
+# No-op if already current; upgrades catalog if library is newer.
+psql -h localhost -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "ALTER EXTENSION vector UPDATE;"
+echo "[init] 'pgvector' extension is at latest version"
 
 # Wait for the main Postgres process to exit
 wait "$PG_PID"

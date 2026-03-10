@@ -1,10 +1,9 @@
 {
   "mcpServers": {
     "postgres": {
-      "command": "npx",
+      "command": "uvx",
       "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
+        "postgres-mcp-server",
         "postgresql://postgres:change_me@db:5432/openwebui"
       ]
     }

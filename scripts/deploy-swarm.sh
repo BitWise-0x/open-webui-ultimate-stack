@@ -34,6 +34,8 @@ fi
 
 # Ensure required variables are set
 : "${STACK_NAME:?STACK_NAME must be set in .env}"
+: "${ROUTER_NAME:?ROUTER_NAME must be set in .env}"
+: "${ROOT_DOMAIN:?ROOT_DOMAIN must be set in .env}"
 : "${BACKEND_NETWORK_NAME:?BACKEND_NETWORK_NAME must be set in .env}"
 : "${DATA_ROOT:?DATA_ROOT must be set in .env}"
 
@@ -107,13 +109,15 @@ if [ -n "${REDIS_DATA_ROOT:-}" ] && [ "${REDIS_DATA_ROOT}" != "${DATA_ROOT}" ]; 
   [ -d "${REDIS_DATA_ROOT}" ] || { echo "ERROR: REDIS_DATA_ROOT '${REDIS_DATA_ROOT}' does not exist or is not mounted" >&2; exit 1; }
 fi
 
-# Warn if SEARXNG_BASE_URL still points to standalone default
-SEARXNG_BASE_URL_VAL=$(grep '^SEARXNG_BASE_URL=' env/searxng.env 2>/dev/null | cut -d= -f2-)
-if [ "${SEARXNG_BASE_URL_VAL}" = "http://localhost:8888/" ]; then
-  echo "ERROR: SEARXNG_BASE_URL is still set to the standalone default (http://localhost:8888/)" >&2
-  echo "       Set SEARXNG_BASE_URL=http://searxng:8080/ (or /searxng for Traefik subpath) in env/searxng.env" >&2
-  exit 1
-fi
+# Ensure service data directories exist on the shared filesystem
+echo "[*] Ensuring service data directories exist..."
+sudo mkdir -p "${DATA_ROOT}/open-webui/data"
+sudo mkdir -p "${DATA_ROOT}/open-webui/postgres/init"
+sudo mkdir -p "${DATA_ROOT}/open-webui/searxng/conf"
+sudo mkdir -p "${DATA_ROOT}/open-webui/tika/conf"
+sudo mkdir -p "${DATA_ROOT}/open-webui/mcposerver/conf"
+sudo mkdir -p "${DATA_ROOT}/open-webui/tools"
+sudo mkdir -p "${REDIS_DATA_ROOT:-${DATA_ROOT}}/open-webui/redis/data"
 
 # Read overlay subnet from owui.env (FORWARDED_ALLOW_IPS is the source of truth)
 # deploy-swarm.sh uses this CIDR to create the overlay network — no hardcoded subnet.
@@ -130,13 +134,22 @@ if ! echo "${BACKEND_SUBNET}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+
 fi
 BACKEND_GATEWAY=$(echo "${BACKEND_SUBNET}" | sed 's|\.[0-9]*/.*|.1|')
 
+# Warn if SEARXNG_BASE_URL still points to standalone default
+SEARXNG_BASE_URL_VAL=$(grep '^SEARXNG_BASE_URL=' env/searxng.env 2>/dev/null | cut -d= -f2-)
+if [ "${SEARXNG_BASE_URL_VAL}" = "http://localhost:8888/" ]; then
+  echo "ERROR: SEARXNG_BASE_URL is still set to the standalone default (http://localhost:8888/)" >&2
+  echo "       Set SEARXNG_BASE_URL=http://searxng:8080/ (or /searxng for Traefik subpath) in env/searxng.env" >&2
+  exit 1
+fi
+
 echo "[*] Stack:          ${STACK_NAME}"
+echo "[*] Domain:         ${ROUTER_NAME}.${ROOT_DOMAIN}"
 echo "[*] Backend net:    ${BACKEND_NETWORK_NAME}"
 echo "[*] Data root:      ${DATA_ROOT}"
-[ -n "${ROUTER_NAME:-}" ] && [ -n "${ROOT_DOMAIN:-}" ] && echo "[*] Domain:         ${ROUTER_NAME}.${ROOT_DOMAIN}"
 echo ""
 
 # Create overlay network (idempotent)
+# Subnet and gateway are derived from FORWARDED_ALLOW_IPS in env/owui.env (validated above).
 if docker network inspect "${BACKEND_NETWORK_NAME}" >/dev/null 2>&1; then
   echo "[~] Network ${BACKEND_NETWORK_NAME} already exists"
 else
@@ -150,11 +163,14 @@ else
 fi
 
 # Create external volumes (idempotent)
-docker volume create "${STACK_NAME}_postgresdata" 2>/dev/null && echo "[+] Created volume ${STACK_NAME}_postgresdata" \
-  || echo "[~] Volume ${STACK_NAME}_postgresdata already exists"
-
-docker volume create "${STACK_NAME}_searxngcache" 2>/dev/null && echo "[+] Created volume ${STACK_NAME}_searxngcache" \
-  || echo "[~] Volume ${STACK_NAME}_searxngcache already exists"
+for vol in "${STACK_NAME}_postgresdata" "${STACK_NAME}_searxngcache"; do
+  if docker volume inspect "$vol" >/dev/null 2>&1; then
+    echo "[~] Volume $vol already exists"
+  else
+    docker volume create "$vol"
+    echo "[+] Created volume $vol"
+  fi
+done
 
 # Sync conf/tools to DATA_ROOT for the tools-init container
 TOOLS_SRC="./conf/tools"
@@ -162,9 +178,9 @@ TOOLS_DST="${DATA_ROOT}/open-webui/tools"
 if [ -d "$TOOLS_SRC" ]; then
   echo "[*] Syncing tools to ${TOOLS_DST}..."
   echo "[!] Note: --delete is active — files in ${TOOLS_DST} not present in ${TOOLS_SRC} will be removed"
-  mkdir -p "$TOOLS_DST"
-  rsync -av --delete --exclude='__pycache__' "$TOOLS_SRC/" "$TOOLS_DST/"
-  cp -f ./scripts/install-tools.sh "$TOOLS_DST/install-tools.sh"
+  sudo mkdir -p "$TOOLS_DST"
+  sudo rsync -av --delete --exclude='__pycache__' "$TOOLS_SRC/" "$TOOLS_DST/"
+  sudo cp -f ./scripts/install-tools.sh "$TOOLS_DST/install-tools.sh"
   echo "[+] Tools synced"
 fi
 
@@ -173,9 +189,9 @@ PG_INIT_SRC="./conf/postgres/init"
 PG_INIT_DST="${DATA_ROOT}/open-webui/postgres/init"
 if [ -d "$PG_INIT_SRC" ]; then
   echo "[*] Syncing postgres init scripts to ${PG_INIT_DST}..."
-  mkdir -p "$PG_INIT_DST"
-  rsync -av "$PG_INIT_SRC/" "$PG_INIT_DST/"
-  chmod +x "${PG_INIT_DST}"/*.sh 2>/dev/null || true
+  sudo mkdir -p "$PG_INIT_DST"
+  sudo rsync -av "$PG_INIT_SRC/" "$PG_INIT_DST/"
+  sudo chmod +x "${PG_INIT_DST}"/*.sh 2>/dev/null || true
   echo "[+] Postgres init scripts synced"
 fi
 
@@ -183,12 +199,12 @@ fi
 MCP_SRC="./conf/mcposerver"
 MCP_DST="${DATA_ROOT}/open-webui/mcposerver/conf"
 echo "[*] Syncing mcposerver config to ${MCP_DST}..."
-mkdir -p "$MCP_DST"
-rsync -av "$MCP_SRC/" "$MCP_DST/"
+sudo mkdir -p "$MCP_DST"
+sudo rsync -av "$MCP_SRC/" "$MCP_DST/"
 # Generate config.json from example on first deploy only — preserves user customisations on redeploy
 if [ ! -f "${MCP_DST}/config.json" ]; then
   if [ -f "${MCP_DST}/config.json.example" ]; then
-    cp "${MCP_DST}/config.json.example" "${MCP_DST}/config.json"
+    sudo cp "${MCP_DST}/config.json.example" "${MCP_DST}/config.json"
     echo "[+] Generated config.json from example"
   else
     echo "ERROR: Neither config.json nor config.json.example found in ${MCP_DST}" >&2; exit 1
@@ -196,7 +212,7 @@ if [ ! -f "${MCP_DST}/config.json" ]; then
 fi
 # Inject postgres password — Python handles all special characters safely, idempotent on re-deploy.
 # Uses rfind('@') to locate the userinfo/host boundary, so passwords containing '@' are handled correctly.
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" python3 -c "
+sudo POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "$(command -v python3)" -c "
 import json, os, sys
 path = sys.argv[1]
 pw = os.environ['POSTGRES_PASSWORD']
@@ -222,8 +238,8 @@ TIKA_SRC="./conf/tika"
 TIKA_DST="${DATA_ROOT}/open-webui/tika/conf"
 if [ -d "$TIKA_SRC" ]; then
   echo "[*] Syncing tika config to ${TIKA_DST}..."
-  mkdir -p "$TIKA_DST"
-  rsync -av "$TIKA_SRC/" "$TIKA_DST/"
+  sudo mkdir -p "$TIKA_DST"
+  sudo rsync -av "$TIKA_SRC/" "$TIKA_DST/"
   echo "[+] Tika config synced"
 fi
 
@@ -232,10 +248,23 @@ SEARXNG_SRC="./conf/searxng"
 SEARXNG_DST="${DATA_ROOT}/open-webui/searxng/conf"
 if [ -d "$SEARXNG_SRC" ]; then
   echo "[*] Syncing searxng config to ${SEARXNG_DST}..."
-  mkdir -p "$SEARXNG_DST"
-  rsync -av "$SEARXNG_SRC/" "$SEARXNG_DST/"
+  sudo mkdir -p "$SEARXNG_DST"
+  sudo rsync -av "$SEARXNG_SRC/" "$SEARXNG_DST/"
   echo "[+] SearXNG config synced"
 fi
+
+# Sync wait-for-services script
+echo "[*] Syncing wait-for-services script..."
+sudo mkdir -p "${DATA_ROOT}/open-webui/scripts"
+sudo cp -f ./conf/wait-for-services.sh "${DATA_ROOT}/open-webui/scripts/wait-for-services.sh"
+sudo chmod +x "${DATA_ROOT}/open-webui/scripts/wait-for-services.sh"
+echo "[+] Wait script synced"
+
+# Set correct ownership for service directories
+echo "[*] Setting service directory ownership..."
+sudo chown -R 999:999 "${DATA_ROOT}/open-webui/postgres"
+sudo chown -R 977:977 "${DATA_ROOT}/open-webui/searxng"
+sudo chown -R 999:999 "${REDIS_DATA_ROOT:-${DATA_ROOT}}/open-webui/redis/data"
 
 echo ""
 echo "[*] Deploying stack ${STACK_NAME}..."
