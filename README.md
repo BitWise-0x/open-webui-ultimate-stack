@@ -267,6 +267,7 @@ open-webui-ultimate-stack/
 │       ├── functions/           Python pipes and functions (auto-deployed)
 │       └── extras/              ComfyUI API workflows and sample data
 ├── docs/
+│   ├── post-config.md           Post-deployment manual configuration guide
 │   └── passwordreset.md         Emergency password reset runbook
 ├── env/                         Per-service env.example files
 │   ├── owui.env.example
@@ -492,6 +493,19 @@ docker network rm ${BACKEND_NETWORK_NAME:-open-webui_backend}
 | Restart policy | `unless-stopped` | `on-failure` with max attempts |
 | Config files | Mounted directly from `./conf/` | Synced via rsync to shared filesystem |
 | CORS | Not configured | `CORS_ALLOW_ORIGIN` set from `ROUTER_NAME.ROOT_DOMAIN` |
+
+<br>
+
+### Post-Deployment Configuration
+
+Once the stack is running, some settings require manual configuration via the Admin Panel. See the **[Post-Configuration Guide](docs/post-config.md)** for:
+
+- MCP connections (GitHub, gitmcp.io) via native Streamable HTTP
+- Enabling native function calling (agentic mode) per model
+- Environment variables and API keys for third-party services
+- Filter activation and Valve configuration
+- ComfyUI workflow imports and model setup
+- Function pipe and tool Valve tuning
 
 <br>
 
