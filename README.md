@@ -527,7 +527,7 @@ All tools retain their original author metadata in their docstring headers.
 
 ## Useful Resources
 
-> **Read the full write-up:** [The Open WebUI Ultimate Stack: A Production Deployment for the LLM Interface Era](https://blog.bitwisesolutions.co/blog/open-webui-ultimate-stack) — covers architecture, deployment, and the full suite of bundled tools, filters, and function pipes.
+> **Read the full write-up:** [The Open WebUI Ultimate Stack: A Production Deployment for the LLM Interface Era](https://blog.bitwise0x.com/blog/open-webui-ultimate-stack) — covers architecture, deployment, and the full suite of bundled tools, filters, and function pipes.
 
 <br>
 
