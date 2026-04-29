@@ -84,7 +84,53 @@ install_item() {
     --rawfile content "$file" \
     '{id: $id, name: $name, content: $content, meta: {description: $desc}}')
 
+  # Probe existing item: if content+name+description match what's on disk,
+  # skip the write entirely. This avoids triggering Open WebUI's module
+  # reload + frontmatter pip-install on every redeploy — which blocks the
+  # live workers and causes intermittent 5xx during deploys.
+  local existing_code existing_body
+  existing_body=$(curl -s --max-time 30 -w "\n%{http_code}" -X GET "${API_URL}/api/v1/${endpoint}/id/${id}" \
+    -H "Authorization: Bearer ${TOKEN}" 2>&1)
+  existing_code=$(echo "$existing_body" | tail -1)
+  existing_body=$(echo "$existing_body" | sed '$d')
+
+  if [[ "$existing_code" =~ ^2[0-9]{2}$ ]] && echo "$existing_body" | jq . >/dev/null 2>&1; then
+    local rc
+    rc=$(jq -n \
+      --argjson cur "$existing_body" \
+      --argjson new "$payload" \
+      '($cur.content == $new.content)
+        and ($cur.name == $new.name)
+        and (($cur.meta.description // "") == ($new.meta.description // ""))' 2>/dev/null || echo false)
+    if [ "$rc" = "true" ]; then
+      echo "UNCHANGED — skipping"
+      return 0
+    fi
+  fi
+
   local response http_code body
+  if [[ "$existing_code" =~ ^2[0-9]{2}$ ]]; then
+    # Exists and content differs — update directly (skip create→409→update dance).
+    response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/id/${id}/update" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d @- 2>&1)
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+    if [[ "$http_code" =~ ^2[0-9]{2}$ ]]; then
+      echo "UPDATED (${http_code})"
+      return 0
+    fi
+    echo "UPDATE FAILED (${http_code})"
+    if echo "$body" | jq . >/dev/null 2>&1; then
+      echo "$body" | jq -r '.detail // .' 2>/dev/null || true
+    else
+      echo "$body"
+    fi
+    return 1
+  fi
+
+  # Doesn't exist (404 or otherwise) — create.
   response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/create" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
@@ -94,10 +140,11 @@ install_item() {
   body=$(echo "$response" | sed '$d')
 
   if [[ "$http_code" =~ ^2[0-9]{2}$ ]]; then
-    echo "OK (${http_code})"
+    echo "CREATED (${http_code})"
     return 0
   elif echo "$body" | jq . >/dev/null 2>&1 && echo "$body" | jq -r '.detail // empty' 2>/dev/null | grep -qi "already\|registered"; then
-    echo "EXISTS — updating..."
+    # Race: GET said missing but create says exists. Fall back to update.
+    echo "EXISTS (race) — updating..."
     local update_response update_code
     update_response=$(echo "$payload" | curl -s --max-time 30 -w "\n%{http_code}" -X POST "${API_URL}/api/v1/${endpoint}/id/${id}/update" \
       -H "Authorization: Bearer ${TOKEN}" \
@@ -107,17 +154,16 @@ install_item() {
     if [[ "$update_code" =~ ^2[0-9]{2}$ ]]; then
       echo "  UPDATED (${update_code})"
       return 0
-    else
-      echo "  UPDATE FAILED (${update_code})"
-      local update_body
-      update_body=$(echo "$update_response" | sed '$d')
-      if echo "$update_body" | jq . >/dev/null 2>&1; then
-        echo "$update_body" | jq -r '.detail // .' 2>/dev/null || true
-      else
-        echo "$update_body"
-      fi
-      return 1
     fi
+    echo "  UPDATE FAILED (${update_code})"
+    local update_body
+    update_body=$(echo "$update_response" | sed '$d')
+    if echo "$update_body" | jq . >/dev/null 2>&1; then
+      echo "$update_body" | jq -r '.detail // .' 2>/dev/null || true
+    else
+      echo "$update_body"
+    fi
+    return 1
   else
     echo "FAILED (${http_code})"
     if echo "$body" | jq . >/dev/null 2>&1; then

@@ -364,7 +364,7 @@ Used by:
 - **mcposerver** — waits for `db:5432`
 - **tools-init** — waits for `openwebui:8080`
 
-Auto-detects the TCP check method (`nc`, `python3`, or `python`). Configurable via `WAIT_TIMEOUT` (default: 120s) and `WAIT_INTERVAL` (default: 2s).
+Auto-detects the TCP check method (`nc`, `python3`, or `python`). Configurable via `WAIT_TIMEOUT` (default: 120s) and `WAIT_INTERVAL` (default: 2s). The `tools-init` service overrides `WAIT_TIMEOUT=300` because Open WebUI's first boot (DB migrations + function module loading + frontmatter pip installs) can run several minutes before port 8080 is reachable.
 
 ### `conf/postgres/init/entrypoint.sh`
 

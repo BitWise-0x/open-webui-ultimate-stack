@@ -243,6 +243,11 @@ services:
     env_file: env/tools-init.env
     environment:
       TZ: America/New_York
+      # 300s is needed because openwebui bind ≠ ready: migrations + function
+      # module loading + frontmatter pip installs can run several minutes on
+      # fresh boots (slim base image has no nc, so the wait script falls back
+      # to python3 socket connect — works fine here).
+      WAIT_TIMEOUT: "300"
     entrypoint: ["bash", "/wait-for-services.sh", "openwebui:8080", "--"]
     command: ["bash", "-c", "apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1 && exec bash /scripts/install-tools.sh"]
     volumes:
