@@ -4,7 +4,8 @@ description: Generate images using ComfyUI Qwen Image workflow. Uses ComfyUI HTT
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.2.1
+version: 0.2.3
+required_open_webui_version: 0.9.1
 license: MIT
 """
 
@@ -17,7 +18,7 @@ import time
 import uuid
 import aiohttp
 
-from typing import Any, Dict, Optional, Callable, Awaitable, List
+from typing import Any, Dict, Optional, Callable, Awaitable, List, Tuple, Union
 from urllib.parse import quote
 from pydantic import BaseModel, Field
 from fastapi import UploadFile
@@ -266,7 +267,7 @@ async def download_and_upload_to_owui(
 
         if request and user:
             file = UploadFile(file=io.BytesIO(content), filename=filename)
-            file_item = upload_file_handler(
+            file_item = await upload_file_handler(
                 request=request, file=file, metadata={}, process=False, user=user
             )
             file_id = getattr(file_item, "id", None)
@@ -339,7 +340,7 @@ class Tools:
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
         __user__: Optional[Dict[str, Any]] = None,
         __request__: Optional[Any] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
         Generate an image from a text prompt using ComfyUI Qwen Image workflow.
 
@@ -468,7 +469,7 @@ class Tools:
                     img_info["filename"],
                     img_info["subfolder"],
                     __request__,
-                    Users.get_user_by_id(__user__["id"]) if __user__ else None,
+                    await Users.get_user_by_id(__user__["id"]) if __user__ else None,
                     comfyui_headers,
                 )
                 image_urls.append(url)
@@ -569,10 +570,13 @@ class Tools:
 </body>
 </html>"""
 
-            return HTMLResponse(
-                content=html_content,
-                media_type="text/html",
-                headers={"content-disposition": "inline"},
+            return (
+                HTMLResponse(
+                    content=html_content,
+                    media_type="text/html",
+                    headers={"content-disposition": "inline"},
+                ),
+                f"Image generated successfully and displayed above. Download link: {image_url}",
             )
 
         except Exception as e:

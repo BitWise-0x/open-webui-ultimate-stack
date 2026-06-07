@@ -3,7 +3,8 @@ title: Semantic Router Filter
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 1.1.0
+version: 2.0.1
+required_open_webui_version: 0.9.1
 description: Filter that acts a model router, using model descriptions and capabilities
 (make sure to set them in the models you want to be presented to the router)
 and the prompt, selecting the best model base, pipe or preset for the task completion.
@@ -36,8 +37,7 @@ from open_webui.utils.misc import get_last_user_message
 from open_webui.utils.payload import convert_payload_openai_to_ollama
 from open_webui.models.users import UserModel, Users
 from open_webui.models.files import FileMetadataResponse, Files
-from open_webui.models.models import ModelUserResponse, ModelModel
-from open_webui.routers.models import get_models, get_base_models
+from open_webui.models.models import ModelUserResponse, ModelModel, Models
 
 name = "semantic_router"
 
@@ -142,6 +142,17 @@ def clean_ollama_params(payload: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def extract_models_list(response: Any) -> list:
+    """Helper to safely extract model lists from Open WebUI response objects"""
+    if hasattr(response, "data"):
+        return list(response.data)
+    elif isinstance(response, dict) and "data" in response:
+        return list(response["data"])
+    elif isinstance(response, list):
+        return list(response)
+    return []
+
+
 class Filter:
     class Valves(BaseModel):
         vision_fallback_model_id: str = Field(
@@ -200,27 +211,84 @@ class Filter:
 
         return bool(last_message.get("images"))
 
-    def _get_available_models(
+    async def _get_full_model_data(self, model_id: str) -> Dict[str, Any]:
+        """Construct a complete model data dictionary from app.state.MODELS and DB"""
+        models_state = getattr(self.__request__.app.state, "MODELS", {})
+        model_info = models_state.get(model_id, {})
+        model_db_info = await Models.get_model_by_id(model_id)
+
+        meta = {}
+        params = {}
+
+        info_meta = model_info.get("info", {}).get("meta", {})
+        if isinstance(info_meta, dict):
+            meta.update(info_meta)
+
+        info_params = model_info.get("info", {}).get("params", {})
+        if isinstance(info_params, dict):
+            params.update(info_params)
+
+        is_active = True
+        created_at = None
+        updated_at = None
+        base_model_id = model_info.get("info", {}).get("base_model_id")
+        owned_by = model_info.get("owned_by") or model_info.get("info", {}).get(
+            "owned_by", "custom"
+        )
+
+        if model_db_info:
+            is_active = getattr(model_db_info, "is_active", is_active)
+            created_at = getattr(model_db_info, "created_at", created_at)
+            updated_at = getattr(model_db_info, "updated_at", updated_at)
+            base_model_id = getattr(model_db_info, "base_model_id", base_model_id)
+
+            db_meta = model_db_info.meta
+            if hasattr(db_meta, "model_dump"):
+                db_meta = db_meta.model_dump()
+            if isinstance(db_meta, dict):
+                meta.update(db_meta)
+
+            db_params = model_db_info.params
+            if hasattr(db_params, "model_dump"):
+                db_params = db_params.model_dump()
+            if isinstance(db_params, dict):
+                params.update(db_params)
+
+        pipeline = meta.get("pipeline", {}) or model_info.get("pipeline", {})
+
+        return {
+            "id": model_id,
+            "name": model_info.get("name", model_id),
+            "meta": meta,
+            "params": params,
+            "is_active": is_active,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "pipeline": pipeline,
+            "base_model_id": base_model_id,
+            "owned_by": owned_by,
+        }
+
+    async def _get_available_models(
         self,
-        models_data: List[Union[ModelUserResponse, ModelModel, Dict[str, Any]]],
         filter_vision: bool = False,
     ) -> List[ModelInfo]:
         """
         Get available models for routing with proper type handling
 
         Args:
-            models_data: List of model objects (Pydantic models or dicts)
             filter_vision: If True, only return vision-capable models
         """
         available: List[ModelInfo] = []
+        models_state = getattr(self.__request__.app.state, "MODELS", {})
 
         if self.valves.debug:
             logger.debug(
-                f"Processing {len(models_data)} models for routing (filter_vision={filter_vision})"
+                f"Processing {len(models_state)} models for routing (filter_vision={filter_vision})"
             )
 
-        for model in models_data:
-            model_dict = extract_model_data(model)
+        for model_id in models_state.keys():
+            model_dict = await self._get_full_model_data(model_id)
             model_id = model_dict.get("id")
             meta = model_dict.get("meta", {})
             pipeline_type = model_dict.get("pipeline", {}).get("type")
@@ -334,23 +402,10 @@ class Filter:
             router_model = base_model_id or body.get("model")
 
         if has_images:
-            from open_webui.routers.models import get_models, get_base_models
+            models_state = getattr(self.__request__.app.state, "MODELS", {})
 
-            all_models = await get_models(
-                self.__request__, self.__user__
-            ) + await get_base_models(self.__user__)
-
-            router_model_obj = next(
-                (
-                    m
-                    for m in all_models
-                    if extract_model_data(m).get("id") == router_model
-                ),
-                None,
-            )
-
-            if router_model_obj:
-                router_model_data = extract_model_data(router_model_obj)
+            if router_model in models_state:
+                router_model_data = self._get_full_model_data(router_model)
                 if not is_vision_capable(router_model_data):
                     if self.valves.vision_fallback_model_id:
                         logger.info(
@@ -526,7 +581,7 @@ class Filter:
 
             for file_id in file_ids:
                 try:
-                    file_metadata = Files.get_file_metadata_by_id(file_id)
+                    file_metadata = await Files.get_file_metadata_by_id(file_id)
                     if file_metadata:
                         if not any(f["id"] == file_metadata.id for f in files_data):
                             file_data = self._build_file_data(
@@ -555,91 +610,6 @@ class Filter:
             logger.debug(f"File IDs: {[f['id'] for f in files_data]}")
 
         return files_data
-
-    def _build_collection_data(
-        self, collection_id: str, files: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Build collection data structure for knowledge field.
-        This should contain file IDs, not file objects.
-        """
-        file_ids = [f["id"] for f in files if "id" in f]
-
-        return {
-            "id": collection_id,
-            "data": {"file_ids": file_ids, "citations": True},
-            "type": "collection",
-            "meta": {
-                "citations": True,
-                "source": {"name": collection_id, "id": collection_id},
-            },
-            "source": {"name": collection_id, "id": collection_id},
-            "document": [f"Collection: {collection_id}"],
-            "metadata": [
-                {
-                    "name": collection_id,
-                    "collection_name": collection_id,
-                    "citations": True,
-                }
-            ],
-            "distances": [1.0],
-        }
-
-    def _process_files_for_knowledge(
-        self,
-        files_data: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Process files and group into collections.
-        Groups files by their collection_name field (from _build_file_data).
-        """
-        if self.valves.debug:
-            logger.debug(
-                f"_process_files_for_knowledge called with {len(files_data)} files"
-            )
-            logger.debug(
-                f"Files input to _process_files_for_knowledge: {json.dumps(files_data, indent=2, default=str)}"
-            )
-
-        collections: Dict[str, List[Dict[str, Any]]] = {}
-
-        for file_data in files_data:
-            collection_name = file_data.get("collection_name")
-            if not collection_name:
-                if self.valves.debug:
-                    logger.debug(
-                        f"File {file_data.get('id')} has no collection_name, skipping"
-                    )
-                    logger.debug(
-                        f"File data without collection_name: {json.dumps(file_data, indent=2, default=str)}"
-                    )
-                continue
-
-            collections.setdefault(collection_name, []).append(file_data)
-
-        if self.valves.debug:
-            logger.debug(
-                f"Processed {len(files_data)} files into {len(collections)} collections"
-            )
-            for cid, files in collections.items():
-                logger.debug(
-                    f"  Collection '{cid}': {len(files)} files - {[f['id'] for f in files]}"
-                )
-
-        result = [
-            self._build_collection_data(cid, files)
-            for cid, files in collections.items()
-        ]
-
-        if self.valves.debug:
-            logger.debug(
-                f"_process_files_for_knowledge returning {len(result)} collection structures"
-            )
-            logger.debug(
-                f"Final collection structures: {json.dumps(result, indent=2, default=str)}"
-            )
-
-        return result
 
     def _merge_files(
         self, existing_files: List[Dict[str, Any]], new_files: List[Dict[str, Any]]
@@ -671,20 +641,89 @@ class Filter:
         new_body = original_body.copy()
         new_body["model"] = selected_model["id"]
 
-        model_data = extract_model_data(selected_model_full)
+        model_data = selected_model_full
         meta = model_data.get("meta", {})
+
+        params = model_data.get("params", {})
+        info_params = model_data.get("info", {}).get("params", {})
+
+        has_native_fc = False
+        if params.get("function_calling") == "native":
+            has_native_fc = True
+        elif (
+            isinstance(info_params, dict)
+            and info_params.get("function_calling") == "native"
+        ):
+            has_native_fc = True
+        elif (
+            hasattr(info_params, "model_dump")
+            and info_params.model_dump().get("function_calling") == "native"
+        ):
+            has_native_fc = True
+        elif isinstance(meta, dict):
+            cap = meta.get("capabilities", {})
+            if isinstance(cap, dict) and cap.get("function_calling"):
+                has_native_fc = True
 
         new_body.setdefault("metadata", {})
         original_metadata = original_body.get("metadata", {})
+
+        if has_native_fc:
+            new_body.pop("files", None)
+            if "files" in new_body["metadata"]:
+                new_body["metadata"].pop("files", None)
+            new_body["metadata"].setdefault("params", {})["function_calling"] = "native"
 
         new_body["metadata"]["filterIds"] = [
             fid for fid in meta.get("filterIds", []) if fid != "semantic_router_filter"
         ]
 
+        # 1. Start with global features from request body
+        global_features = (
+            original_metadata.get("features") or original_body.get("features") or {}
+        )
+        p_features = {}
+        p_features.update(global_features)
+
+        default_tool_ids = []
+
+        if isinstance(meta, dict):
+            default_tool_ids.extend(meta.get("toolIds", []))
+            if isinstance(meta.get("features"), dict):
+                p_features.update(meta["features"])
+            for f_id in meta.get("defaultFeatureIds", []):
+                p_features[f_id] = True
+
+        params = model_data.get("params", {})
+        if isinstance(params, dict):
+            default_tool_ids.extend(
+                params.get("toolIds", []) or params.get("tools", [])
+            )
+            if isinstance(params.get("features"), dict):
+                p_features.update(params["features"])
+            for f_id in params.get("defaultFeatureIds", []):
+                p_features[f_id] = True
+
+        # Clean and deduplicate tool IDs
+        clean_default_ids = []
+        for t in default_tool_ids:
+            if isinstance(t, str) and t.strip():
+                clean_default_ids.append(t.strip())
+            elif isinstance(t, dict) and "id" in t:
+                clean_default_ids.append(str(t["id"]))
+
+        global_tool_ids = (
+            original_metadata.get("tool_ids") or original_body.get("tool_ids") or []
+        )
+        combined_tool_ids = list(set(global_tool_ids + clean_default_ids))
+
         new_body.pop("tool_ids", None)
         new_body["metadata"].pop("tool_ids", None)
-        if meta.get("toolIds"):
-            new_body["tool_ids"] = meta["toolIds"].copy()
+        if combined_tool_ids:
+            new_body["tool_ids"] = combined_tool_ids
+
+        new_body["features"] = p_features
+        new_body["metadata"]["features"] = p_features
 
         for key in [
             "user_id",
@@ -700,49 +739,84 @@ class Filter:
         new_body["metadata"]["model"] = self._build_model_metadata(
             selected_model, model_data, original_metadata.get("model", {})
         )
-        new_body["metadata"]["features"] = original_body.get("features", {})
         model_knowledge = meta.get("knowledge", [])
         if model_knowledge:
-            new_body["metadata"]["model"].setdefault("info", {}).setdefault("meta", {})[
-                "knowledge"
-            ] = model_knowledge
-
-            collection_items = []
-            for knowledge_item in model_knowledge:
-                if isinstance(knowledge_item, dict) and knowledge_item.get("id"):
-                    collection_items.append(
+            normalized_knowledge = []
+            for item in model_knowledge:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") and item.get("id"):
+                    normalized_knowledge.append(item)
+                elif item.get("collection_name"):
+                    normalized_knowledge.append(
                         {
                             "type": "collection",
-                            "id": knowledge_item["id"],
+                            "id": item["collection_name"],
+                            "name": item.get("name", ""),
+                        }
+                    )
+                else:
+                    normalized_knowledge.append(item)
+
+            if normalized_knowledge:
+                new_body["metadata"]["model"].setdefault("info", {}).setdefault(
+                    "meta", {}
+                )["knowledge"] = normalized_knowledge
+
+                if not has_native_fc:
+                    collection_items = []
+                    for knowledge_item in normalized_knowledge:
+                        if isinstance(knowledge_item, dict) and knowledge_item.get(
+                            "id"
+                        ):
+                            collection_items.append(
+                                {
+                                    "type": "collection",
+                                    "id": knowledge_item["id"],
+                                    "legacy": False,
+                                    "collection_name": knowledge_item.get("name", "")
+                                    or knowledge_item["id"],
+                                }
+                            )
+
+                    new_body["files"] = collection_items
+
+                    if self.valves.debug:
+                        logger.debug(
+                            f"Set body['files'] with {len(collection_items)} collection items for RAG"
+                        )
+                        logger.debug(
+                            f"Collection items: {json.dumps(collection_items, indent=2, default=str)}"
+                        )
+                # else:
+                #     new_body.pop("files", None)
+                #     if self.valves.debug:
+                #         logger.debug(
+                #             "Skipped setting body['files'] for collection items because model has native tool calling"
+                #         )
+
+        elif files_data:
+            if not has_native_fc:
+                file_items = []
+                for file_data in files_data:
+                    file_items.append(
+                        {
+                            "type": "file",
+                            "id": file_data.get("id"),
+                            "name": file_data.get("name"),
                             "legacy": False,
-                            "collection_name": knowledge_item["id"],
                         }
                     )
 
-            new_body["files"] = collection_items
-
-            if self.valves.debug:
-                logger.debug(
-                    f"Set body['files'] with {len(collection_items)} collection items for RAG"
-                )
-                logger.debug(
-                    f"Collection items: {json.dumps(collection_items, indent=2, default=str)}"
-                )
-        elif files_data:
-            file_items = []
-            for file_data in files_data:
-                file_items.append(
-                    {
-                        "type": "file",
-                        "id": file_data.get("id"),
-                        "name": file_data.get("name"),
-                        "legacy": False,
-                    }
-                )
-
-            new_body["files"] = file_items
-            if self.valves.debug:
-                logger.debug(f"Set body['files'] with {len(file_items)} file items")
+                new_body["files"] = file_items
+                if self.valves.debug:
+                    logger.debug(f"Set body['files'] with {len(file_items)} file items")
+            # else:
+            #     new_body.pop("files", None)
+            #     if self.valves.debug:
+            #         logger.debug(
+            #             "Skipped setting body['files'] for file items because model has native tool calling"
+            #         )
 
         return new_body
 
@@ -790,6 +864,16 @@ class Filter:
             if meta.get("toolIds"):
                 updated_model["info"]["meta"]["toolIds"] = meta["toolIds"]
 
+        # Ensure capabilities and builtinTools from the selected model's meta are preserved
+        if "capabilities" in meta:
+            updated_model["info"].setdefault("meta", {})["capabilities"] = meta[
+                "capabilities"
+            ]
+        if "builtinTools" in meta:
+            updated_model["info"].setdefault("meta", {})["builtinTools"] = meta[
+                "builtinTools"
+            ]
+
         if "params" in original_model:
             updated_model["info"]["params"] = original_model["params"]
 
@@ -806,7 +890,9 @@ class Filter:
         """Main filter entry point"""
         self.__request__ = __request__
         self.__model__ = __model__
-        self.__user__ = Users.get_user_by_id(__user__["id"]) if __user__ else None
+        self.__user__ = await Users.get_user_by_id(__user__["id"]) if __user__ else None
+
+        models_state = getattr(self.__request__.app.state, "MODELS", {})
 
         messages = body.get("messages", [])
         has_assistant_messages = any(msg.get("role") == "assistant" for msg in messages)
@@ -818,9 +904,7 @@ class Filter:
                     content = msg.get("content", "")
                     if isinstance(content, str):
                         # Pattern to match marker with optional newlines before/after
-                        marker_pattern = (
-                            r"\n*\u200B\u200C\u200D\u2060(.*?)\u200B\u200C\u200D\u2060\n*"
-                        )
+                        marker_pattern = r"\n*\u200B\u200C\u200D\u2060(.*?)\u200B\u200C\u200D\u2060\n*"
                         match = re.search(marker_pattern, content)
                         if match:
                             routed_model_id = match.group(1)
@@ -844,21 +928,12 @@ class Filter:
                 logger.info("=" * 80)
 
                 try:
-                    models = await get_models(
-                        self.__request__, self.__user__
-                    ) + await get_base_models(self.__user__)
-
-                    selected_model_full = next(
-                        (
-                            m
-                            for m in models
-                            if extract_model_data(m).get("id") == routed_model_id
-                        ),
-                        None,
-                    )
+                    selected_model_full = None
+                    if routed_model_id in models_state:
+                        selected_model_full = self._get_full_model_data(routed_model_id)
 
                     if selected_model_full:
-                        model_data = extract_model_data(selected_model_full)
+                        model_data = selected_model_full
                         meta = model_data.get("meta", {})
 
                         selected_model: ModelInfo = {
@@ -880,7 +955,9 @@ class Filter:
                             logger.info(
                                 f"  Current model: {routed_model_id} (vision_capable=False)"
                             )
-                            logger.info("  Triggering fresh routing with vision filter...")
+                            logger.info(
+                                "  Triggering fresh routing with vision filter..."
+                            )
                             logger.info("=" * 80)
                             # Fall through to routing logic below by not returning
                             has_assistant_messages = False
@@ -903,10 +980,12 @@ class Filter:
 
                             knowledge = meta.get("knowledge", [])
                             if isinstance(knowledge, list) and knowledge:
-                                knowledge_files = await self._get_files_from_collections(
-                                    knowledge
+                                knowledge_files = (
+                                    await self._get_files_from_collections(knowledge)
                                 )
-                                files_data = self._merge_files(files_data, knowledge_files)
+                                files_data = self._merge_files(
+                                    files_data, knowledge_files
+                                )
                                 if self.valves.debug:
                                     logger.debug(
                                         f"Restored {len(knowledge_files)} knowledge files from routed model"
@@ -916,13 +995,17 @@ class Filter:
                                 body, selected_model, selected_model_full, files_data
                             )
                             source_owned_by = (
-                                body.get("metadata", {}).get("model", {}).get("owned_by")
+                                body.get("metadata", {})
+                                .get("model", {})
+                                .get("owned_by")
                             )
                             target_owned_by = model_data.get("owned_by")
 
                             if source_owned_by != target_owned_by:
                                 if target_owned_by == "ollama":
-                                    new_body = convert_payload_openai_to_ollama(new_body)
+                                    new_body = convert_payload_openai_to_ollama(
+                                        new_body
+                                    )
                                 else:
                                     new_body = clean_ollama_params(new_body)
 
@@ -948,29 +1031,20 @@ class Filter:
                         exc_info=True,
                     )
                     return body
+
             else:
                 # No routing marker found - check if we need to re-route for vision
                 has_images_now = self._has_images(messages)
-                
+
                 if has_images_now:
                     # Check if current model has vision capability
                     try:
-                        models = await get_models(
-                            self.__request__, self.__user__
-                        ) + await get_base_models(self.__user__)
-                        
                         current_model_id = body.get("model")
-                        current_model_full = next(
-                            (
-                                m
-                                for m in models
-                                if extract_model_data(m).get("id") == current_model_id
-                            ),
-                            None,
-                        )
-                        
-                        if current_model_full:
-                            current_model_data = extract_model_data(current_model_full)
+
+                        if current_model_id in models_state:
+                            current_model_data = self._get_full_model_data(
+                                current_model_id
+                            )
                             if not is_vision_capable(current_model_data):
                                 logger.info("=" * 80)
                                 logger.info(
@@ -979,28 +1053,27 @@ class Filter:
                                 logger.info(
                                     f"  Current model: {current_model_id} (vision_capable=False)"
                                 )
-                                logger.info("  Triggering fresh routing with vision filter...")
+                                logger.info(
+                                    "  Triggering fresh routing with vision filter..."
+                                )
                                 logger.info("=" * 80)
                                 # Fall through to routing logic below
                                 has_assistant_messages = False
                             else:
                                 # Current model has vision, continue without routing
                                 logger.info("=" * 80)
-                                logger.info("SKIPPING ROUTING - Conversation continuation detected")
-                                logger.info(f"  Current body['model']: {body.get('model')}")
+                                logger.info(
+                                    "SKIPPING ROUTING - Conversation continuation detected"
+                                )
+                                logger.info(
+                                    f"  Current body['model']: {body.get('model')}"
+                                )
                                 logger.info(f"  Message count: {len(messages)}")
-                                logger.info("  Current model has vision capability, no re-routing needed")
+                                logger.info(
+                                    "  Current model has vision capability, no re-routing needed"
+                                )
                                 logger.info("=" * 80)
                                 return body
-                        else:
-                            # Model not found, return as-is
-                            logger.info("=" * 80)
-                            logger.info("SKIPPING ROUTING - Conversation continuation detected")
-                            logger.info(f"  Current body['model']: {body.get('model')}")
-                            logger.info(f"  Message count: {len(messages)}")
-                            logger.info("  Current model not found in available models")
-                            logger.info("=" * 80)
-                            return body
                     except Exception as e:
                         logger.error(
                             f"Error checking current model vision capability: {e}",
@@ -1021,21 +1094,15 @@ class Filter:
         has_images = self._has_images(messages)
 
         try:
-            models = await get_models(
-                self.__request__, self.__user__
-            ) + await get_base_models(self.__user__)
-
-            if not models:
-                logger.warning("No models returned from get_models()")
+            if not models_state:
+                logger.warning("No models found in app.state.MODELS")
                 return body
 
             if has_images:
                 if self.valves.debug:
                     logger.debug("Message contains images, filtering for vision models")
 
-                available_models = self._get_available_models(
-                    models, filter_vision=True
-                )
+                available_models = await self._get_available_models(filter_vision=True)
 
                 if not available_models and self.valves.vision_fallback_model_id:
                     if self.valves.debug:
@@ -1049,9 +1116,7 @@ class Filter:
                     logger.warning("No vision-capable models found and no fallback set")
                     return body
             else:
-                available_models = self._get_available_models(
-                    models, filter_vision=False
-                )
+                available_models = await self._get_available_models(filter_vision=False)
 
             if not available_models:
                 logger.warning("No valid models found for routing")
@@ -1105,14 +1170,9 @@ class Filter:
                 )
                 return body
 
-            selected_model_full = next(
-                (
-                    m
-                    for m in models
-                    if extract_model_data(m).get("id") == selected_model["id"]
-                ),
-                None,
-            )
+            selected_model_full = None
+            if selected_model["id"] in models_state:
+                selected_model_full = await self._get_full_model_data(selected_model["id"])
 
             if not selected_model_full:
                 logger.warning(
@@ -1176,7 +1236,7 @@ class Filter:
                 if self.valves.debug:
                     logger.debug("Step 2: No knowledge collections in source model")
 
-            model_data = extract_model_data(selected_model_full)
+            model_data = selected_model_full
             meta = model_data.get("meta", {})
             knowledge = meta.get("knowledge", [])
 

@@ -4,7 +4,8 @@ description: Tool to generate speech using VibeVoice workflows via ComfyUI API. 
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 1.1.1
+version: 1.1.3
+required_open_webui_version: 0.9.1
 """
 
 import os
@@ -13,7 +14,7 @@ import uuid
 import asyncio
 import aiohttp
 
-from typing import Optional, Dict, Any, Callable, Awaitable, cast, Union
+from typing import Optional, Dict, Any, Callable, Awaitable, cast, Union, Tuple
 from pydantic import BaseModel, Field
 from open_webui.models.users import Users
 from fastapi.responses import HTMLResponse
@@ -266,7 +267,7 @@ async def download_audio_to_storage(
                         headers={"content-type": content_type},
                     )
 
-                    file_item = upload_file_handler(
+                    file_item = await upload_file_handler(
                         request,
                         file=upload_file,
                         metadata={},
@@ -293,7 +294,7 @@ async def download_audio_to_storage(
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    api_url: str = "http://localhost:11434",
 ) -> list[Dict[str, Any]]:
     """Get all currently loaded models in VRAM"""
     try:
@@ -308,7 +309,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
+async def unload_all_models_async(api_url: str = "http://localhost:11434") -> bool:
     """Unload all currently loaded models from VRAM"""
     try:
         loaded_models = await get_loaded_models_async(api_url)
@@ -814,7 +815,7 @@ class Tools:
         __user__: Dict[str, Any] = {},
         __request__: Optional[Request] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
         Generate natural, expressive speech from text using voice cloning.
 
@@ -829,7 +830,7 @@ class Tools:
         """
         try:
             # Get user valves
-            user = Users.get_user_by_id(__user__["id"])
+            user = await Users.get_user_by_id(__user__["id"])
             user_valves = (
                 user.valves
                 if hasattr(user, "valves") and user.valves
@@ -960,8 +961,12 @@ class Tools:
                 html_content = generate_audio_player_embed(
                     audio_url, text, speaker_info, "Single Speaker"
                 )
-                return HTMLResponse(
-                    content=html_content, headers={"content-disposition": "inline"}
+                return (
+                    HTMLResponse(
+                        content=html_content,
+                        headers={"Content-Disposition": "inline"},
+                    ),
+                    f"Speech audio generated successfully and embedded above. Download link: {audio_url}",
                 )
             else:
                 return f"Audio generated successfully!\n\nDownload: {audio_url}"
@@ -983,7 +988,7 @@ class Tools:
         __user__: Dict[str, Any] = {},
         __request__: Optional[Request] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
                 Generate dynamic multi-speaker conversations with distinct cloned voices.
 
@@ -1004,7 +1009,7 @@ class Tools:
         """
         try:
             # Get user valves
-            user = Users.get_user_by_id(__user__["id"])
+            user = await Users.get_user_by_id(__user__["id"])
             user_valves = (
                 user.valves
                 if hasattr(user, "valves") and user.valves
@@ -1138,8 +1143,12 @@ class Tools:
                 html_content = generate_audio_player_embed(
                     audio_url, text, speaker_info, "Multi-Speaker"
                 )
-                return HTMLResponse(
-                    content=html_content, headers={"content-disposition": "inline"}
+                return (
+                    HTMLResponse(
+                        content=html_content,
+                        headers={"Content-Disposition": "inline"},
+                    ),
+                    f"Multi-speaker speech audio generated successfully and embedded above. Download link: {audio_url}",
                 )
             else:
                 return f"Audio generated successfully!\n\nDownload: {audio_url}"

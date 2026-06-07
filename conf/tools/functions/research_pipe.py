@@ -6,11 +6,11 @@ author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
 original MCTS implementation i based this project of: https://github.com/av // https://openwebui.com/f/everlier/mcts/
 git: https://github.com/Haervwe/open-webui-tools
-version: 0.4.9
+version: 0.5.0
+required_open_webui_version: 0.9.1
 """
 
-import os
-from datetime import datetime
+from datetime import datetime 
 import logging
 import random
 import re
@@ -247,7 +247,7 @@ class Pipe:
             default=None, description="Model to use (model id from ollama)"
         )
         TAVILY_API_KEY: str = Field(
-            default=os.getenv("TAVILY_API_KEY", ""), description="API key for Tavily search service",
+            default="", description="API key for Tavily search service",
             json_schema_extra={"input": {"type": "password"}},
         )
         MAX_SEARCH_RESULTS: int = Field(
@@ -652,7 +652,7 @@ class Pipe:
         model = self.valves.MODEL
         logger.debug(f"Model {model}")
         logger.debug(f"User: {__user__}")
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         self.__request__ = __request__
         if __task__ and __task__ != TASKS.DEFAULT:
             logger.debug(f"Model {TASKS}")

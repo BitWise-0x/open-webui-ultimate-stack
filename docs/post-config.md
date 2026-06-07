@@ -80,7 +80,7 @@ Per-model setting — no global toggle. Only needs to be done once per model (pe
 <img src="https://img.shields.io/badge/automated-service_URLs-4CAF50?style=flat-square" alt="Service URLs automated"/>
 <img src="https://img.shields.io/badge/manual-API_keys-FF9800?style=flat-square" alt="API keys manual"/>
 
-> **Automated:** Service URLs (ComfyUI, Ollama, SearXNG, WebUI) are pre-set in `env/owui.env` and injected into the container at deploy time. Tools read these via `os.getenv()` in their Valve defaults.
+> **Automated:** Service URLs (ComfyUI, Ollama, WebUI) are pre-set in `env/owui.env` and injected into the container at deploy time. Tools read these via `os.getenv()` in their Valve defaults. (SearXNG's URL is a static Valve default, not env-driven.)
 >
 > **Manual:** API keys for third-party services are commented out by default. Uncomment and populate them in `env/owui.env` before deploying, or set them after deploy and restart the stack.
 
@@ -90,7 +90,6 @@ Per-model setting — no global toggle. Only needs to be done once per model (pe
 |----------|---------|
 | `COMFYUI_API_URL` | All ComfyUI tools + Flux Kontext pipe |
 | `OLLAMA_BASE_URL` | All tools with model unloading |
-| `SEARXNG_IMAGE_SEARCH_URL` | SearXNG Image Search tool |
 | `WEBUI_URL` | Native Image Gen tool |
 | `OPENROUTER_API_KEY` | OpenRouter Image pipe |
 
@@ -286,7 +285,7 @@ Several tools support `unload_ollama_models` (default: off). When enabled, tools
 <img src="https://img.shields.io/badge/automated-install_%2B_env_var_defaults-4CAF50?style=flat-square" alt="Install + env automated"/>
 <img src="https://img.shields.io/badge/manual-external_service_valves-FF9800?style=flat-square" alt="External valves manual"/>
 
-> **Automated:** All tool Python files are pushed via `tools-init` on every deploy. Tools that reference env vars (e.g. `SEARXNG_IMAGE_SEARCH_URL`, `OLLAMA_BASE_URL`) pick up their defaults from `env/owui.env`.
+> **Automated:** All tool Python files are pushed via `tools-init` on every deploy. Tools that reference env vars (e.g. `COMFYUI_API_URL`, `OLLAMA_BASE_URL`) pick up their defaults from `env/owui.env`.
 >
 > **Manual:** Tools that depend on external services (Perplexica, image backends) need their Valves configured in the Admin Panel to point to the correct endpoints.
 
@@ -299,7 +298,7 @@ Several tools support `unload_ollama_models` (default: off). When enabled, tools
 - Set `BASE_URL`, `CHAT_MODEL`, `EMBEDDING_MODEL` in Valves
 
 #### SearXNG Image Search
-- Uses `SEARXNG_IMAGE_SEARCH_URL` env var (default: `http://searxng:8080/search`)
+- SearXNG endpoint is set in the tool's Valve (default: `http://searxng:8080/search`)
 - SearXNG must be running (already part of this stack)
 
 </td>
@@ -320,19 +319,36 @@ Several tools support `unload_ollama_models` (default: off). When enabled, tools
 ## Syncing with Upstream
 
 <img src="https://img.shields.io/badge/automated-deploy_push_via_tools--init-4CAF50?style=flat-square" alt="Deploy push automated"/>
-<img src="https://img.shields.io/badge/manual-upstream_pull_%2B_env_patching-FF9800?style=flat-square" alt="Pull + patch manual"/>
+<img src="https://img.shields.io/badge/manual-upstream_pull_%2B_host_patching-FF9800?style=flat-square" alt="Pull + patch manual"/>
 
 > **Automated:** `tools-init` pushes whatever is in `conf/tools/` on every deploy — no manual upload needed after syncing files locally.
 >
-> **Manual:** Pulling from upstream and re-patching `os.getenv()` calls in Valve defaults must be done locally before deploying.
+> **Manual:** Pulling from upstream and patching the hardcoded service hosts in Valve defaults must be done locally before deploying.
 
 The tools are sourced from the [Haervwe/open-webui-tools](https://github.com/Haervwe/open-webui-tools) repository.
 
-After syncing (copying files from upstream to `conf/tools/`), the `os.getenv()` calls
-in Valve defaults will be overwritten with hardcoded values. These must be re-patched
-to restore environment variable integration.
+Upstream ships the ComfyUI and Ollama endpoints as **hardcoded host literals** in the
+Valve defaults (e.g. `default="http://localhost:8188"`). After syncing (copying files
+from upstream to `conf/tools/`), patch those defaults to read from the environment so a
+single value in `env/owui.env` drives every tool:
+
+```python
+# upstream:
+default="http://localhost:8188"
+# patched:
+default=os.getenv("COMFYUI_API_URL", "http://localhost:8188")
+```
+
+Only three env vars are wired into Valve defaults this way:
 
 > **Env vars used in tool Valve defaults:**
-> `COMFYUI_API_URL`, `COMFYUI_API_KEY`, `OLLAMA_BASE_URL`, `SEARXNG_IMAGE_SEARCH_URL`, `WEBUI_URL`,
-> `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`, `YOUTUBE_API_KEY`, `PEXELS_API_KEY`, `HF_API_KEY`,
-> `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `OPENWEATHERMAP_API_KEY`, `TAVILY_API_KEY`, `RAPIDAPI_KEY`
+> `COMFYUI_API_URL` (all ComfyUI tools + Flux Kontext pipe), `OLLAMA_BASE_URL`
+> (tools with model unloading), `WEBUI_URL` (Native Image Gen).
+
+All other service credentials — `COMFYUI_API_KEY`, `OPENROUTER_API_KEY`, `YOUTUBE_API_KEY`,
+`PEXELS_API_KEY`, and the rest — are **not** env-driven; enter them directly in each
+tool's Valves in the Admin Panel.
+
+> **Open WebUI compatibility:** the current tools require **Open WebUI 0.9.1+** (they
+> use the async `Users.get_user_by_id` and the 0.9.x web-search env vars). Pin
+> `ghcr.io/open-webui/open-webui` accordingly if you are not tracking `main`.

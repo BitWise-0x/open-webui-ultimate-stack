@@ -3,7 +3,8 @@ title: Prompt Enhancer
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.6.5
+version: 0.6.6
+required_open_webui_version: 0.9.1
 important note: if you are going to sue this filter with custom pipes, do not use the show enhanced prompt valve setting
 """
 
@@ -107,7 +108,9 @@ Now, enhance the following prompt using the Context and The user prompt, return 
         self.__current_event_emitter__ = __event_emitter__
         self.__request__ = __request__
         self.__model__ = __model__
-        self.__user__ = Users.get_user_by_id(__user__["id"]) if __user__ else None
+        self.__user__ = (
+            await Users.get_user_by_id(__user__["id"]) if __user__ else None
+        )
         if __task__ and __task__ != TASKS.DEFAULT:
             return body
 
@@ -317,5 +320,5 @@ Now, enhance the following prompt using the Context and The user prompt, return 
         self.__current_event_emitter__ = __event_emitter__
         self.__request__ = __request__
         self.__model__ = __model__
-        self.__user__ = Users.get_user_by_id(__user__["id"]) if __user__ else None
+        self.__user__ = await Users.get_user_by_id(__user__["id"]) if __user__ else None
         return body

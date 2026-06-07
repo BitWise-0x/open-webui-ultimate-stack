@@ -4,7 +4,8 @@ description: Generate video from text prompt via ComfyUI workflow JSON. Uses Com
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.3.1
+version: 0.3.2
+required_open_webui_version: 0.9.1
 license: MIT
 """
 
@@ -186,7 +187,7 @@ DEFAULT_WORKFLOW: Dict[str, Any] = {
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    api_url: str = "http://localhost:11434",
 ) -> list[Dict[str, Any]]:
     try:
         async with aiohttp.ClientSession() as session:
@@ -200,7 +201,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
+async def unload_all_models_async(api_url: str = "http://localhost:11434") -> bool:
     try:
         loaded_models = await get_loaded_models_async(api_url)
         if not loaded_models:
@@ -426,7 +427,7 @@ async def download_and_upload_to_owui(
 
         if request and user:
             file = UploadFile(file=io.BytesIO(content), filename=filename)
-            file_item = upload_file_handler(
+            file_item = await upload_file_handler(
                 request=request, file=file, metadata={}, process=False, user=user
             )
             file_id = getattr(file_item, "id", None)
@@ -599,7 +600,7 @@ class Tools:
                 return "ComfyUI job completed, but no video output was found in the results."
 
             video_info = video_files[0]
-            current_user = Users.get_user_by_id(__user__["id"]) if __user__ else None
+            current_user = await Users.get_user_by_id(__user__["id"]) if __user__ else None
 
             final_url, _ = await download_and_upload_to_owui(
                 http_api_url,
@@ -625,7 +626,7 @@ class Tools:
                 return HTMLResponse(
                     content=html_player,
                     headers={"content-disposition": "inline"},
-                )
+                ), f"🎬 Video generated successfully. Link: {final_url}"
             return f"🎬 Video generated successfully. Link: {final_url}"
 
         except Exception as e:

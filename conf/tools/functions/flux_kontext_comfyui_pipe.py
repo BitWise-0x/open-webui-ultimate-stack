@@ -6,9 +6,9 @@ authors:
     - Zed Unknown
 author_url: https://github.com/Haervwe/open-webui-tools
 description: Edit images using the Flux Kontext workflow API in ComfyUI.
-required_open_webui_version: 0.4.0
+required_open_webui_version: 0.9.1
 requirements:
-version: 6.1.1
+version: 6.1.2
 license: MIT
 
 ComfyUI Required Nodes For Default Workflow:
@@ -628,8 +628,8 @@ class Pipe:
                     temp_image_data = node_output["images"][0]
         return final_image_data if final_image_data else temp_image_data
 
-    def _save_image_and_get_public_url(
-        self, request: Any, image_data: bytes, content_type: str, user: User
+    async def _save_image_and_get_public_url(
+        self, request: Any, image_data: bytes, content_type: str, user: Any
     ) -> str:
         try:
             image_format = mimetypes.guess_extension(content_type)
@@ -643,7 +643,7 @@ class Pipe:
 
             file_item = cast(
                 Any,
-                upload_file_handler(
+                await upload_file_handler(
                     request=request,
                     file=file,
                     metadata={},
@@ -1019,7 +1019,7 @@ class Pipe:
         """
         self.__event_emitter__ = __event_emitter__
         self.__request__ = __request__
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         self.__event_call__ = __event_call__
         try:
             self._load_config_and_apply()
@@ -1252,7 +1252,7 @@ class Pipe:
                         f"Downloaded image data: {len(image_data)} bytes, type: {content_type}"
                     )
 
-                    public_image_url = self._save_image_and_get_public_url(
+                    public_image_url = await self._save_image_and_get_public_url(
                         request=self.__request__,
                         image_data=image_data,
                         content_type=content_type,
@@ -1295,7 +1295,7 @@ class Pipe:
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    api_url: str = "http://localhost:11434",
 ) -> list[Dict[str, Any]]:
     try:
         async with aiohttp.ClientSession() as session:
@@ -1311,7 +1311,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
+async def unload_all_models_async(api_url: str = "http://localhost:11434") -> bool:
     try:
         models = await get_loaded_models_async(api_url)
         if not models:

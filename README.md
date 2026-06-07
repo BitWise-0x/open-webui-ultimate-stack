@@ -88,11 +88,11 @@ graph TD
 
 ### Core
 
-<img src="https://img.shields.io/badge/Open_WebUI-main-000000?style=flat-square&logo=openai&logoColor=white" alt="Open WebUI"/>
+<img src="https://img.shields.io/badge/Open_WebUI-main_(0.9.1%2B)-000000?style=flat-square&logo=openai&logoColor=white" alt="Open WebUI"/>
 <img src="https://img.shields.io/badge/PostgreSQL-pgvector_pg17-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
 <img src="https://img.shields.io/badge/Valkey-9--alpine-FF4438?style=flat-square&logo=redis&logoColor=white" alt="Valkey"/>
 
-- **openwebui**: Open WebUI with RAG, tools, pipelines, and multi-model support
+- **openwebui**: Open WebUI with RAG, tools, pipelines, and multi-model support — tracks `:main`; the bundled tools require **0.9.1+** (async user API + 0.9.x web-search vars)
 - **db**: PostgreSQL 17 with pgvector for vector embeddings and semantic search
 - **redis**: Valkey (Redis-compatible) for WebSocket session management and caching
 

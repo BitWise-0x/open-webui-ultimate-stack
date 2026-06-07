@@ -3,7 +3,8 @@ title: Mopidy_Music_Controller
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.7.1
+version: 0.7.2
+required_open_webui_version: 0.9.1
 description: A pipe to control Mopidy music server to play songs from local library or YouTube, manage playlists, and handle various music commands. Requires Mopidy-Iris UI to be installed for the player interface.
 needs a Local and/or a Youtube API endpoint configured in mopidy.
 mopidy repo: https://github.com/mopidy
@@ -1111,7 +1112,7 @@ class Pipe:
     ) -> str:
         """Main pipe function to process music requests."""
         self.__current_event_emitter__ = __event_emitter__
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         self.__model__ = self.valves.Model or __model__
         self.__request__ = __request__
         if self.valves.Debug_Logging:

@@ -4,22 +4,22 @@ author: Haervwe
 Based on @justinrahb tool
 author_url: https://github.com/Haervwe/open-webui-tools
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.3.0
-required_open_webui_version: 0.6.31
+version: 0.3.2
+required_open_webui_version: 0.9.1
 """
 
 import os
 import aiohttp
 from fastapi import Request
 from pydantic import BaseModel, Field
-from typing import Any, Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict, List, Tuple, Union
 from open_webui.routers.images import image_generations, GenerateImageForm
 from open_webui.models.users import Users
 from fastapi.responses import HTMLResponse
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    api_url: str = "http://localhost:11434",
 ) -> List[Dict[str, Any]]:
     """Get all currently loaded models in VRAM"""
     try:
@@ -34,7 +34,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
+async def unload_all_models_async(api_url: str = "http://localhost:11434") -> bool:
     """Unload all currently loaded models from VRAM"""
     try:
         loaded_models = await get_loaded_models_async(api_url)
@@ -89,7 +89,7 @@ class Tools:
         __request__: Request | None = None,
         __user__: dict[str, Any] | None = None,
         __event_emitter__: Optional[Callable[[Dict[str, Any]], Any]] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
         Generate an image given a prompt
 
@@ -122,7 +122,7 @@ class Tools:
             images = await image_generations(
                 request=__request__,
                 form_data=GenerateImageForm(prompt=prompt, model=model),
-                user=Users.get_user_by_id(__user__["id"]),
+                user=await Users.get_user_by_id(__user__["id"]),
             )
             if __event_emitter__:
                 await __event_emitter__(
@@ -147,23 +147,17 @@ class Tools:
 <div style="margin:0; padding:0; border:none; line-height:0;">{"".join(markdown_attachments)}</div>
 </body>
 </html>"""
-                return HTMLResponse(
-                    content=html_content,
-                    media_type="text/html",
-                    headers={"content-disposition": "inline"},
+                urls_line = " ".join(bare_urls)
+                return (
+                    HTMLResponse(
+                        content=html_content,
+                        media_type="text/html",
+                        headers={"Content-Disposition": "inline"},
+                    ),
+                    f"Images generated and displayed inline. Download links: {urls_line}",
                 )
 
             urls_line = " ".join(bare_urls)
-
-            if self.valves.emit_embeds and __event_emitter__:
-                return f"""Images were generated and displayed inline. 
-            Provide these download links (bare URLs): {urls_line} 
-            - Do not use ! markdown attachments here. 
-            use download links and acknowledge the images were displayed above"""
-
-            if self.valves.emit_embeds and not __event_emitter__:
-                return f"Images were generated but could not be displayed inline (no event emitter). Provide these download links (bare URLs): {urls_line}"
-
             return f"Images generated. Provide the following download links (bare URLs): {urls_line}"
 
         except Exception as e:

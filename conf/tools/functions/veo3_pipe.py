@@ -5,9 +5,9 @@ authors:
 author_url: https://github.com/Haervwe/open-webui-tools
 funding_url: https://github.com/Haervwe/open-webui-tools
 description: Generate videos using Google's Veo 3.1 model via Gemini API.
-required_open_webui_version: 0.4.0
+required_open_webui_version: 0.9.1
 requirements: google-genai
-version: 2.0.1
+version: 2.1.0
 license: MIT
 
 This pipe generates videos using Google's Veo 3.1 model through the Gemini API.
@@ -38,7 +38,7 @@ class Pipe:
     class Valves(BaseModel):
         GOOGLE_API_KEY: str = Field(
             title="Google API Key",
-            default=os.getenv("GOOGLE_API_KEY", ""),
+            default="",
             description="Google API key for Gemini API access.",
             json_schema_extra={"input": {"type": "password"}},
         )
@@ -160,7 +160,7 @@ class Pipe:
 
         return prompt, base64_images
 
-    def _save_video_and_get_public_url(
+    async def _save_video_and_get_public_url(
         self,
         request: Any,
         video_data: bytes,
@@ -176,7 +176,7 @@ class Pipe:
             )
 
             # Upload using the handler
-            file_item = upload_file_handler(
+            file_item = await upload_file_handler(
                 request=request,
                 file=video_file,
                 metadata={},
@@ -293,7 +293,7 @@ class Pipe:
         """
         self.__event_emitter__ = __event_emitter__
         self.__request__ = __request__
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         self.__event_call__ = __event_call__
 
         # Extract prompt and image from messages
@@ -430,7 +430,7 @@ class Pipe:
             os.remove(temp_filename)
 
             # Save and get public URL
-            public_video_url = self._save_video_and_get_public_url(
+            public_video_url = await self._save_video_and_get_public_url(
                 self.__request__,
                 video_data,
                 "video/mp4",

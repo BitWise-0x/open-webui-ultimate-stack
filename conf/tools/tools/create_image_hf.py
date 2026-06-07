@@ -3,7 +3,7 @@ title: Hugging Face API - Flux Pro Image Generator
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 1.0.1
+version: 1.0.2
 license: MIT
 description: HuggingFace API implementation for text to image generation
 """
@@ -34,7 +34,7 @@ class HFException(Exception):
 class Tools:
     class Valves(BaseModel):
         HF_API_KEY: str = Field(
-            default=os.getenv("HF_API_KEY", ""),
+            default=None,
             description="HuggingFace API key for accessing the serverless endpoints",
             json_schema_extra={"input": {"type": "password"}},
         )
@@ -129,9 +129,9 @@ class Tools:
                 filename=filename,
                 headers={"content-type": "image/png"},
             )
-            current_user = Users.get_user_by_id(__user__["id"]) if __user__ else None
+            current_user = await Users.get_user_by_id(__user__["id"]) if __user__ else None
 
-            file_item = upload_file_handler(
+            file_item = await upload_file_handler(
                 __request__,
                 file=upload_file,
                 metadata={},

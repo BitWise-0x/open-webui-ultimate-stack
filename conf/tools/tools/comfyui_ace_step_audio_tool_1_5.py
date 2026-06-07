@@ -5,15 +5,17 @@ Supports advanced parameters like key, tempo, language, and batch size.
 Requires [ComfyUI-Unload-Model](https://github.com/SeanScripts/ComfyUI-Unload-Model) for model unloading functionality (can be customized via unload_node ID).
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
-funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.5.3
+funding_url: https://github.com/Haervwe/open-webui-tools/
+version: 0.6.1
+required_open_webui_version: 0.9.1
+
 """
 
 import json
 import io
 import re
 import random
-from typing import Optional, Dict, Any, Callable, Awaitable, cast, Union
+from typing import Optional, Dict, Any, Callable, Awaitable, cast, Union, Tuple
 import aiohttp
 import asyncio
 import uuid
@@ -207,7 +209,7 @@ async def download_audio_to_storage(
     try:
         file_extension = os.path.splitext(filename)[1] or ".mp3"
         if song_name:
-            safe_name = re.sub(r"[^\w\s-]", "", song_name).strip().replace(" ", "_")
+            safe_name = re.sub(r"[^\w\s-]", "", song_name).strip()
             local_filename = f"{safe_name}{file_extension}"
         else:
             local_filename = f"ace_step_{uuid.uuid4().hex[:8]}{file_extension}"
@@ -236,7 +238,7 @@ async def download_audio_to_storage(
                         headers={"content-type": content_type},
                     )
 
-                    file_item = upload_file_handler(
+                    file_item = await upload_file_handler(
                         request,
                         file=upload_file,
                         metadata={},
@@ -261,7 +263,7 @@ async def download_audio_to_storage(
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    api_url: str = "http://localhost:11434",
 ) -> list[Dict[str, Any]]:
     try:
         async with aiohttp.ClientSession() as session:
@@ -275,7 +277,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
+async def unload_all_models_async(api_url: str = "http://localhost:11434") -> bool:
     try:
         loaded_models = await get_loaded_models_async(api_url)
         if not loaded_models:
@@ -303,6 +305,75 @@ async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "h
 
     except Exception as e:
         print(f"Error unloading models: {e}")
+        return False
+
+
+async def get_llamacpp_models_async(
+    api_url: str = "http://localhost:8082",
+) -> list[Dict[str, Any]]:
+    """Fetch all models currently known to the llama-server router via GET /v1/models."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{api_url.rstrip('/')}/v1/models") as response:
+                if response.status != 200:
+                    return []
+                data = await response.json()
+                return cast(list[Dict[str, Any]], data.get("data", []))
+    except Exception as e:
+        print(f"Error fetching llama.cpp models: {e}")
+        return []
+
+
+async def unload_all_llamacpp_models_async(
+    api_url: str = "http://localhost:8082",
+) -> bool:
+    """
+    Unload all models loaded in a llama-server router instance.
+
+    Uses GET /v1/models to list models, then POST /models/unload for each one
+    that is currently loaded (in_cache == True or no in_cache field present).
+    """
+    try:
+        models = await get_llamacpp_models_async(api_url)
+        if not models:
+            print("No llama.cpp models found or server unreachable.")
+            return True
+
+        base_url = api_url.rstrip("/")
+        unloaded_any = False
+
+        async with aiohttp.ClientSession() as session:
+            for model in models:
+                model_id = model.get("id", "")
+                # in_cache is present in router mode; if absent we still attempt unload
+                in_cache = model.get("in_cache", True)
+                if not model_id or not in_cache:
+                    continue
+
+                print(f"Unloading llama.cpp model: {model_id}")
+                try:
+                    async with session.post(
+                        f"{base_url}/models/unload",
+                        json={"model": model_id},
+                        headers={"Content-Type": "application/json"},
+                    ) as resp:
+                        if resp.status in (200, 204):
+                            unloaded_any = True
+                        else:
+                            body = await resp.text()
+                            print(
+                                f"Warning: /models/unload returned {resp.status} for '{model_id}': {body}"
+                            )
+                except Exception as e:
+                    print(f"Warning: failed to unload '{model_id}': {e}")
+
+        if not unloaded_any:
+            print("No llama.cpp models were unloaded (none in cache?).")
+
+        return True
+
+    except Exception as e:
+        print(f"Error unloading llama.cpp models: {e}")
         return False
 
 
@@ -904,11 +975,19 @@ class Tools:
         )
         unload_ollama_models: bool = Field(
             default=False,
-            description="Unload all Ollama models before calling ComfyUI.",
+            description="Unload Llamacpp and ollama models before calling ComfyUI.",
         )
         ollama_url: str = Field(
             default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             description="Ollama API URL.",
+        )
+        unload_llamacpp_models: bool = Field(
+            default=False,
+            description="Unload all llama.cpp (llama-server router) models before calling ComfyUI.",
+        )
+        llamacpp_url: str = Field(
+            default="http://localhost:8082",
+            description="llama-server API URL (router mode). Used for model unloading via POST /models/unload.",
         )
         save_to_storage: bool = Field(
             default=True,
@@ -1014,7 +1093,7 @@ class Tools:
         __user__: Dict[str, Any] = {},
         __request__: Optional[Request] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
         Generate music using ACE Step 1.5 with extended parameters.
 
@@ -1045,18 +1124,41 @@ class Tools:
         if steps > self.valves.max_number_of_steps:
             steps = self.valves.max_number_of_steps
 
+        # ── Unload Ollama models ──────────────────────────────────────────────
         if self.valves.unload_ollama_models:
             if __event_emitter__:
                 await __event_emitter__(
                     {
                         "type": "status",
-                        "data": {"description": "Unloading models...", "done": False},
+                        "data": {
+                            "description": "Unloading Ollama models...",
+                            "done": False,
+                        },
                     }
                 )
             unloaded = await unload_all_models_async(self.valves.ollama_url)
             await asyncio.sleep(2)
             if not unloaded:
                 print("Warning: Ollama models may not have fully unloaded.")
+
+        # ── Unload llama.cpp models ───────────────────────────────────────────
+        if self.valves.unload_llamacpp_models:
+            if __event_emitter__:
+                await __event_emitter__(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": "Unloading llama.cpp models...",
+                            "done": False,
+                        },
+                    }
+                )
+            unloaded_cpp = await unload_all_llamacpp_models_async(
+                self.valves.llamacpp_url
+            )
+            await asyncio.sleep(1)
+            if not unloaded_cpp:
+                print("Warning: llama.cpp models may not have fully unloaded.")
 
         if __event_emitter__:
             await __event_emitter__(
@@ -1139,7 +1241,7 @@ class Tools:
             workflow[sampler_node_id]["inputs"]["steps"] = steps
 
         if save_node_id in workflow:
-            safe_title = re.sub(r"[^\w\s-]", "", song_title).strip().replace(" ", "_")
+            safe_title = re.sub(r"[^\w\s-]", "", song_title).strip()
             workflow[save_node_id]["inputs"]["filename_prefix"] = f"audio/{safe_title}"
 
         if not self.valves.unload_comfyui_models:
@@ -1201,13 +1303,15 @@ class Tools:
 
             user_obj = None
             if self.valves.save_to_storage and __request__:
-                user_obj = Users.get_user_by_id(__user__["id"])
+                user_obj = await Users.get_user_by_id(__user__["id"])
 
             for idx, finfo in enumerate(audio_files):
                 fname = finfo["filename"]
                 subfolder = finfo["subfolder"]
                 track_title = (
-                    song_title if batch_size <= 1 else f"{song_title} (Track {idx + 1})"
+                    song_title
+                    if batch_size <= 1 or idx == 0
+                    else f"{song_title} {idx + 1}"
                 )
 
                 if user_obj and __request__:
@@ -1242,14 +1346,21 @@ class Tools:
                     palette_seed=palette_seed,
                     colorful=user_valves.colorful_player,
                 )
-                await __event_emitter__(
-                    {"type": "embeds", "data": {"embeds": [final_html]}}
+                track_links = " | ".join(
+                    f"[{t['title']}]({t['url']})" for t in track_list
                 )
-                message = "The audio player has been successfully embedded above. Inform the user that their song is ready to listen to or download in the above UI component."
+                return (
+                    HTMLResponse(
+                        content=final_html,
+                        headers={"Content-Disposition": "inline"},
+                    ),
+                    {"message": message, "tracks": track_list}
+                )
             else:
-                message += " to use the following download links:"
-
-            return {"message": message, "tracks": track_list}
+                track_links = "\n".join(
+                    f"- [{t['title']}]({t['url']})" for t in track_list
+                )
+                return f"Song '{song_title}' generated successfully!\n\nDownload links:\n{track_links}"
 
         except Exception as e:
             if __event_emitter__:

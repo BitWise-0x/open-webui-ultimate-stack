@@ -3,8 +3,8 @@ title: Planner
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 2.2.0
-required_open_webui_version: 0.6.26
+version: 2.2.1
+required_open_webui_version: 0.9.1
 """
 
 import re
@@ -884,13 +884,14 @@ Remember: Metadata = what's available. @action_id = how to get the real content.
         return "\n".join(mermaid)
 
     async def create_plan(self, goal: str) -> Plan:
+        tools_list = await Tools.get_tools()
         tools: list[dict[str, Any]] = [
             {
                 "tool_id": tool.id,
                 "tool_name": tool.name,
                 "tool_description": tool.meta.description,
             }
-            for tool in Tools.get_tools()
+            for tool in tools_list
         ]
         """Create an execution plan for the given goal"""
         system_prompt = f"""
@@ -1295,13 +1296,14 @@ Return ONLY a numbered list of requirements. Do not include explanations or extr
             "info", "Starting tool validation for plan actions...", False
         )
 
+        tools_list = await Tools.get_tools()
         tools: list[dict[str, Any]] = [
             {
                 "tool_id": tool.id,
                 "tool_name": tool.name,
                 "tool_description": tool.meta.description,
             }
-            for tool in Tools.get_tools()
+            for tool in tools_list
         ]
 
         actions_needing_tools = [
@@ -2967,7 +2969,7 @@ Be brutally honest. A high `quality_score` should only be given to high-quality 
         user: dict[str, Any] | None = None,
     ) -> None | str:
         model = self.valves.MODEL
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         self.__request__ = __request__
         self.user = __user__
         if __task__ and __task__ != TASKS.DEFAULT:

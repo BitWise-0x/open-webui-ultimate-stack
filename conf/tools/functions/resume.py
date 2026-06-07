@@ -3,7 +3,8 @@ title: Resume_analyzer
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.4.6
+version: 0.4.7
+required_open_webui_version: 0.9.1
 requirements: aiofiles
 important note: 1. this script requires the full_document filter added in open web ui to work with attached files, you can find it here : https://openwebui.com/f/haervwe/full_document_filter or in the git hub repo
 2.this script requires a database for resumes it automatically downloads it from my github but if u have trouble : , you can download the one im using on https://www.kaggle.com/datasets/gauravduttakiit/resume-dataset?resource=download 
@@ -66,7 +67,7 @@ class Pipe:
             description="""URL for the Resumes DB""",
         )
         RapidAPI_key: str = Field(
-            default=os.getenv("RAPIDAPI_KEY", ""), description="Your  jobs RapidAPI Key",
+            default="", description="Your  jobs RapidAPI Key",
             json_schema_extra={"input": {"type": "password"}},
         )
         web_search: bool = Field(
@@ -534,7 +535,7 @@ class Pipe:
         __request__=None,
     ) -> str:
         self.__current_event_emitter__ = __event_emitter__
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         self.__model__ = self.valves.Model
         self.__request__ = __request__
         if __task__ and __task__ != TASKS.DEFAULT:

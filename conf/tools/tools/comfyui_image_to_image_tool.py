@@ -4,7 +4,8 @@ description: Edit/transform images using ComfyUI workflows (Flux Kontext or Qwen
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 0.2.1
+version: 0.2.3
+required_open_webui_version: 0.9.1
 license: MIT
 """
 
@@ -17,7 +18,7 @@ import logging
 import aiohttp
 import io
 
-from typing import Any, Dict, Optional, Callable, Awaitable, List, Literal
+from typing import Any, Dict, Optional, Callable, Awaitable, List, Literal, Tuple, Union
 from urllib.parse import quote
 from pydantic import BaseModel, Field
 from fastapi import UploadFile
@@ -399,7 +400,7 @@ async def download_and_upload_to_owui(
 
         if request and user:
             file = UploadFile(file=io.BytesIO(content), filename=filename)
-            file_item = upload_file_handler(
+            file_item = await upload_file_handler(
                 request=request, file=file, metadata={}, process=False, user=user
             )
             file_id = getattr(file_item, "id", None)
@@ -565,7 +566,7 @@ class Tools:
         __user__: Optional[Dict[str, Any]] = None,
         __request__: Optional[Any] = None,
         __messages__: Optional[List[Dict[str, Any]]] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
         Edit or transform images using AI-powered workflows. Images are automatically extracted from the user's message.
 
@@ -726,7 +727,7 @@ class Tools:
             if __user__:
                 user_id = __user__.get("id")
                 if user_id:
-                    user = Users.get_user_by_id(user_id)
+                    user = await Users.get_user_by_id(user_id)
 
             image_url, uploaded = await download_and_upload_to_owui(
                 http_api_url, filename, subfolder, __request__, user,
@@ -819,8 +820,12 @@ class Tools:
     </div>
 </body>
 </html>"""
-                return HTMLResponse(
-                    content=html_content, headers={"content-disposition": "inline"}
+                return (
+                    HTMLResponse(
+                        content=html_content,
+                        headers={"Content-Disposition": "inline"},
+                    ),
+                    f"Image transformation complete and displayed above. Download link: {image_url}",
                 )
             else:
                 return f"✅ Image transformation complete!\n\n**Download:** [Edited Image]({image_url})\n\n**Direct link:** {image_url}"

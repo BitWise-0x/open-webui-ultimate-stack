@@ -4,12 +4,13 @@ description: Tool to generate songs using the ACE Step workflow via the ComfyUI 
 author: Haervwe
 author_url: https://github.com/Haervwe/open-webui-tools/
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 1.1.1
+version: 1.1.3
+required_open_webui_version: 0.9.1
 """
 
 import json
 import random
-from typing import Optional, Dict, Any, Callable, Awaitable, cast, Union
+from typing import Optional, Dict, Any, Callable, Awaitable, cast, Union, Tuple
 import aiohttp
 import asyncio
 import uuid
@@ -259,7 +260,7 @@ async def download_audio_to_storage(
                         headers={"content-type": content_type},
                     )
 
-                    file_item = upload_file_handler(
+                    file_item = await upload_file_handler(
                         request,
                         file=upload_file,
                         metadata={},
@@ -288,7 +289,7 @@ async def download_audio_to_storage(
 
 
 async def get_loaded_models_async(
-    api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    api_url: str = "http://localhost:11434",
 ) -> list[Dict[str, Any]]:
     """Get all currently loaded models in VRAM"""
     try:
@@ -303,7 +304,7 @@ async def get_loaded_models_async(
         return []
 
 
-async def unload_all_models_async(api_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")) -> bool:
+async def unload_all_models_async(api_url: str = "http://localhost:11434") -> bool:
     """Unload all currently loaded models from VRAM"""
     try:
         loaded_models = await get_loaded_models_async(api_url)
@@ -793,7 +794,7 @@ class Tools:
         __user__: Dict[str, Any] = {},
         __request__: Optional[Request] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-    ) -> str | HTMLResponse:
+    ) -> Union[str, Tuple[HTMLResponse, str]]:
         """
                 Tool used to generate music with AI local backend
                 Tags (prompt)
@@ -959,7 +960,7 @@ class Tools:
                 headers=comfyui_headers,
             )
 
-            current_user = Users.get_user_by_id(__user__["id"]) if __user__ else None
+            current_user = await Users.get_user_by_id(__user__["id"]) if __user__ else None
 
             audio_files = extract_audio_files(job_data)
 
@@ -995,14 +996,15 @@ class Tools:
                         html_player = generate_audio_player_embed(
                             local_audio_url, song_title, tags, lyrics
                         )
-                        response = HTMLResponse(
-                            content=html_player,
-                            headers={"content-disposition": "inline"},
+                        return (
+                            HTMLResponse(
+                                content=html_player,
+                                headers={"Content-Disposition": "inline"},
+                            ),
+                            f"Song '{song_title}' generated successfully! The audio player is embedded above. Download link: {local_audio_url}",
                         )
                     else:
-                        response = f"🎵 Song '{song_title}' generated successfully!\n\n**Download:** [{song_title}]({local_audio_url})\n\n**Direct link:** {local_audio_url}"
-
-                    return response
+                        return f"🎵 Song '{song_title}' generated successfully!\n\n**Download:** [{song_title}]({local_audio_url})\n\n**Direct link:** {local_audio_url}"
                 else:
                     # Fallback to ComfyUI direct link if download fails
                     subfolder_param = f"&subfolder={subfolder}" if subfolder else ""
@@ -1023,14 +1025,15 @@ class Tools:
                         html_player = generate_audio_player_embed(
                             comfyui_url, song_title, tags, lyrics
                         )
-                        response = HTMLResponse(
-                            content=html_player,
-                            headers={"content-disposition": "inline"},
+                        return (
+                            HTMLResponse(
+                                content=html_player,
+                                headers={"Content-Disposition": "inline"},
+                            ),
+                            f"Song '{song_title}' generated successfully! The audio player is embedded above. Download link: {comfyui_url}",
                         )
                     else:
-                        response = f"🎵 Song '{song_title}' generated successfully!\n\n**Download:** [{song_title}]({comfyui_url})\n\n**Direct link:** {comfyui_url}"
-
-                    return response
+                        return f"🎵 Song '{song_title}' generated successfully!\n\n**Download:** [{song_title}]({comfyui_url})\n\n**Direct link:** {comfyui_url}"
             else:
                 outputs_json = json.dumps(job_data.get("outputs", {}), indent=2)
                 if __event_emitter__:

@@ -3,7 +3,8 @@ title: OpenRouter Image Adapter Pipe
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 1.0.1
+version: 1.0.2
+required_open_webui_version: 0.9.1
 description: OpenRouter Adapter Pipe for Open WebUI Tools.
 Features: Settings/valves: API key, allowed models, use websearch. Async streaming inference.
 Built-in websearch and image generation support.
@@ -11,7 +12,6 @@ Streaming completions only
 Citations and image event emission. Images are saved to the owui backend and URLs are emitted (not base64).
 """
 
-import os
 import aiohttp
 import mimetypes
 import io
@@ -31,7 +31,7 @@ import uuid
 class Pipe:
     class Valves(BaseModel):
         API_KEY: str = Field(
-            default=os.getenv("OPENROUTER_API_KEY", ""), description="OpenRouter API key",
+            default="", description="OpenRouter API key",
             json_schema_extra={"input": {"type": "password"}},
         )
         ALLOWED_MODELS: List[str] = Field(
@@ -67,7 +67,7 @@ class Pipe:
         __request__: Optional[Request] = None,
     ) -> None:
         self.__request__ = __request__
-        self.__user__ = Users.get_user_by_id(__user__["id"])
+        self.__user__ = await Users.get_user_by_id(__user__["id"])
         pipe_id = body.get("model")
         model = None
         if pipe_id:
@@ -371,7 +371,7 @@ class Pipe:
             file = UploadFile(
                 file=io.BytesIO(img_bytes), filename=f"generated-image{image_format}"
             )
-            file_item: Any = upload_file_handler(  # type: ignore
+            file_item: Any = await upload_file_handler(  # type: ignore
                 request=request, file=file, metadata={}, process=False, user=user
             )
             if not file_item:
