@@ -3,7 +3,10 @@
     "postgres": {
       "command": "uvx",
       "args": [
-        "postgres-mcp-server",
+        "--with",
+        "mcp<2",
+        "postgres-mcp@0.3.0",
+        "--access-mode=restricted",
         "postgresql://postgres:change_me@db:5432/openwebui"
       ]
     }

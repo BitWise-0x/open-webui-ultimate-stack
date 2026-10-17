@@ -3,8 +3,8 @@ title: Multi Model Conversations v2
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 2.9.1
-required_open_webui_version: 0.9.1
+version: 2.9.3
+required_open_webui_version: 0.11.0
 """
 
 import logging
@@ -827,7 +827,7 @@ return (function() {
                 tool_result = f"Error: tool '{name}' not found"
 
             # Process result using Open WebUI's process_tool_result
-            tool_return = process_tool_result(
+            tool_return = await process_tool_result(
                 self.__request__,
                 name,
                 tool_result,
@@ -976,7 +976,15 @@ return (function() {
 
         if __task__ and __task__ != TASKS.DEFAULT:
             # For tasks like title generation or summarization, use the first participant's context
-            first_participant = participants[0] if participants else {"model": self.__model__, "alias": "Assistant"}
+            task_config = self._sanitize_config(
+                self._extract_config_from_metadata(body), valves
+            )
+            participants = task_config.get("participants", [])
+            first_participant = (
+                participants[0]
+                if participants
+                else {"model": self.__model__, "alias": "Assistant"}
+            )
             target_model = first_participant.get("model", self.__model__)
             target_alias = first_participant.get("alias", "Assistant")
             
@@ -1080,6 +1088,9 @@ return (function() {
                 terminal_tools = await get_terminal_tools(
                     self.__request__, terminal_id, self.__user__, extra_params
                 )
+                # may return (tools_dict, system_prompt)
+                if isinstance(terminal_tools, tuple):
+                    terminal_tools = terminal_tools[0]
                 logger.debug(f"[MultiModelTools] Loaded {len(terminal_tools)} terminal tools")
             except Exception as e:
                 logger.error(f"[MultiModelTools] Failed to load terminal tools: {e}")
@@ -1239,7 +1250,7 @@ return (function() {
                 f"[MultiModelTools] Features for {p_model_id}: {p_features}"
             )
             logger.debug(
-                f"[MultiModelTools] ENABLE_IMAGE_GENERATION={getattr(self.__request__.app.state.config, 'ENABLE_IMAGE_GENERATION', 'NOT_SET')}"
+                f"[MultiModelTools] ENABLE_IMAGE_GENERATION={getattr(getattr(self.__request__.app.state, 'config', None), 'ENABLE_IMAGE_GENERATION', 'NOT_SET')}"
             )
 
             try:

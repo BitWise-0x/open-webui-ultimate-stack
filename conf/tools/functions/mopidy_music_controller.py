@@ -10,6 +10,7 @@ needs a Local and/or a Youtube API endpoint configured in mopidy.
 mopidy repo: https://github.com/mopidy
 """
 
+import os
 import logging
 import json
 from typing import Dict, List, Callable, Awaitable, Optional
@@ -69,7 +70,7 @@ class Pipe:
             description="URL for the Mopidy JSON-RPC API endpoint (requires Iris UI installed)",
         )
         YouTube_API_Key: str = Field(
-            default="", description="YouTube Data API key for search",
+            default=os.getenv("YOUTUBE_API_KEY", ""), description="YouTube Data API key for search",
             json_schema_extra={"input": {"type": "password"}},
         )
         Temperature: float = Field(default=0.7, description="Model temperature")

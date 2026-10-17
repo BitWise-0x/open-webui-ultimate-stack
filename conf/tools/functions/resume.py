@@ -67,7 +67,7 @@ class Pipe:
             description="""URL for the Resumes DB""",
         )
         RapidAPI_key: str = Field(
-            default="", description="Your  jobs RapidAPI Key",
+            default=os.getenv("RAPIDAPI_KEY", ""), description="Your  jobs RapidAPI Key",
             json_schema_extra={"input": {"type": "password"}},
         )
         web_search: bool = Field(

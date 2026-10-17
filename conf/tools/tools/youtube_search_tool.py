@@ -8,6 +8,7 @@ version: 1.1.1
 license: MIT
 """
 
+import os
 import aiohttp
 from typing import Any, Optional, Callable, Awaitable, Literal, Union, Tuple
 from pydantic import BaseModel, Field
@@ -57,7 +58,7 @@ async def generate_video_embed(
 class Tools:
     class Valves(BaseModel):
         YOUTUBE_API_KEY: str = Field(
-            default="",
+            default=os.getenv("YOUTUBE_API_KEY", ""),
             description="YouTube Data API v3 key from https://console.cloud.google.com/apis/credentials",
             json_schema_extra={"input": {"type": "password"}},
         )

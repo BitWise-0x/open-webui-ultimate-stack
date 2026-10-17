@@ -58,6 +58,15 @@ if [ "$SWARM" = true ] && [ ! -f ".env" ]; then
   success "  Created .env"
 fi
 
+# The stack ships a Tika 4 config; compose reads .env in standalone mode too
+if [ -f .env ]; then
+  ENV_TIKA_TAG=$(grep '^TIKA_TAG=' .env 2>/dev/null | cut -d= -f2- | tr -d "'\"")
+  case "$ENV_TIKA_TAG" in
+    3.*|2.*) die "TIKA_TAG=${ENV_TIKA_TAG} in .env, but this stack requires Tika 4.
+    Set TIKA_TAG=4.1.0-1 in .env (or remove the line to use the compose default)." ;;
+  esac
+fi
+
 # --- Generate secrets ---
 info "Generating secrets..."
 
@@ -77,6 +86,16 @@ safe_set_env() {
     index($0, k"=") == 1 { print k "=" v; next }
     { print }
   ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+# safe_set_env, appending the key if the file lacks it
+upsert_env() {
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    safe_set_env "$file" "$key" "$value"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
 }
 
 # Escape a value for safe use in sed replacement (with | delimiter).
@@ -100,10 +119,25 @@ fi
 
 inject_secret env/owui.env    WEBUI_SECRET_KEY  "$WEBUI_SECRET"
 inject_secret env/searxng.env SEARXNG_SECRET    "$SEARXNG_SECRET"
+inject_secret env/jupyter.env JUPYTER_TOKEN     "$(generate_secret)"
+
+# Open WebUI must send the kernel's token
+JUPYTER_TOKEN=$(grep '^JUPYTER_TOKEN=' env/jupyter.env 2>/dev/null | cut -d= -f2-)
+if [ -n "$JUPYTER_TOKEN" ] && [ "$JUPYTER_TOKEN" != "change_me" ] && \
+   [ "$(grep '^CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=' env/owui.env 2>/dev/null | cut -d= -f2-)" != "$JUPYTER_TOKEN" ]; then
+  upsert_env env/owui.env CODE_INTERPRETER_JUPYTER_AUTH_TOKEN "$JUPYTER_TOKEN"
+  success "  Synced CODE_INTERPRETER_JUPYTER_AUTH_TOKEN into env/owui.env"
+fi
 
 # Ensure mcposerver runtime config exists
 if [ ! -f conf/mcposerver/config.json ]; then
   cp conf/mcposerver/config.json.example conf/mcposerver/config.json
+fi
+# Replace an old postgres-mcp-server config; the password is re-injected below
+if grep -q '"postgres-mcp-server"' conf/mcposerver/config.json 2>/dev/null; then
+  cp conf/mcposerver/config.json conf/mcposerver/config.json.pre-postgres-mcp.bak
+  cp conf/mcposerver/config.json.example conf/mcposerver/config.json
+  success "  Migrated conf/mcposerver/config.json to postgres-mcp (backup: config.json.pre-postgres-mcp.bak)"
 fi
 
 # Update postgres password consistently across all files

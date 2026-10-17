@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # deploy-swarm.sh — Docker Swarm deployment helper
-# Creates the overlay backend network and deploys the stack.
+# Creates the overlay networks (backend, jupyter) and deploys the stack.
 # Run from the repo root on a Swarm manager node.
 #
 set -euo pipefail
@@ -16,6 +16,16 @@ safe_set_env() {
     index($0, k"=") == 1 { print k "=" v; next }
     { print }
   ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+# safe_set_env, appending the key if the file lacks it
+upsert_env() {
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    safe_set_env "$file" "$key" "$value"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
 }
 
 # Escape a value for safe use in sed replacement (with | delimiter).
@@ -38,6 +48,15 @@ fi
 : "${ROOT_DOMAIN:?ROOT_DOMAIN must be set in .env}"
 : "${BACKEND_NETWORK_NAME:?BACKEND_NETWORK_NAME must be set in .env}"
 : "${DATA_ROOT:?DATA_ROOT must be set in .env}"
+JUPYTER_NETWORK_NAME="${JUPYTER_NETWORK_NAME:-open-webui_jupyter}"
+
+# The stack ships a Tika 4 config
+case "${TIKA_TAG:-}" in
+  3.*|2.*)
+    echo "ERROR: TIKA_TAG=${TIKA_TAG} in .env, but this stack requires Tika 4." >&2
+    echo "       Set TIKA_TAG=4.1.0-1 (or remove the line to use the compose default)." >&2
+    exit 1 ;;
+esac
 
 # Load postgres password from db.env — generate if still set to change_me
 if [ -z "${POSTGRES_PASSWORD:-}" ] && [ -f env/db.env ]; then
@@ -85,6 +104,20 @@ if [ "${WEBUI_SECRET:-}" = "change_me" ]; then
   echo "[+] Generated WEBUI_SECRET_KEY in env/owui.env"
 fi
 
+# Jupyter token (safety net for direct invocation)
+[ -f env/jupyter.env ] || { echo "ERROR: env/jupyter.env not found. Run ./bootstrap.sh --swarm (or copy env/jupyter.env.example)." >&2; exit 1; }
+JUPYTER_TOKEN=$(grep '^JUPYTER_TOKEN=' env/jupyter.env 2>/dev/null | cut -d= -f2-)
+if [ -z "${JUPYTER_TOKEN}" ] || [ "${JUPYTER_TOKEN}" = "change_me" ]; then
+  JUPYTER_TOKEN=$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))")
+  [ -n "$JUPYTER_TOKEN" ] || { echo "ERROR: JUPYTER_TOKEN generation failed: install openssl or python3" >&2; exit 1; }
+  upsert_env env/jupyter.env JUPYTER_TOKEN "$JUPYTER_TOKEN"
+  echo "[+] Generated JUPYTER_TOKEN in env/jupyter.env"
+fi
+if [ "$(grep '^CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=' env/owui.env 2>/dev/null | cut -d= -f2-)" != "$JUPYTER_TOKEN" ]; then
+  upsert_env env/owui.env CODE_INTERPRETER_JUPYTER_AUTH_TOKEN "$JUPYTER_TOKEN"
+  echo "[+] Synced CODE_INTERPRETER_JUPYTER_AUTH_TOKEN into env/owui.env"
+fi
+
 # Sync tools-init credentials from owui.env whenever they differ
 if [ -f env/tools-init.env ] && [ -f env/owui.env ]; then
   OWUI_EMAIL=$(grep '^WEBUI_ADMIN_EMAIL=' env/owui.env 2>/dev/null | cut -d= -f2-)
@@ -117,6 +150,7 @@ sudo mkdir -p "${DATA_ROOT}/open-webui/searxng/conf"
 sudo mkdir -p "${DATA_ROOT}/open-webui/tika/conf"
 sudo mkdir -p "${DATA_ROOT}/open-webui/mcposerver/conf"
 sudo mkdir -p "${DATA_ROOT}/open-webui/tools"
+sudo mkdir -p "${DATA_ROOT}/open-webui/jupyter"
 sudo mkdir -p "${REDIS_DATA_ROOT:-${DATA_ROOT}}/open-webui/redis/data"
 
 # Read overlay subnet from owui.env (FORWARDED_ALLOW_IPS is the source of truth)
@@ -160,6 +194,15 @@ else
     "${BACKEND_NETWORK_NAME}" \
     || { echo "ERROR: Failed to create network ${BACKEND_NETWORK_NAME} — check for subnet conflicts (${BACKEND_SUBNET})" >&2; exit 1; }
   echo "[+] Created network ${BACKEND_NETWORK_NAME}"
+fi
+
+# Isolated overlay for the jupyter kernel (idempotent)
+if docker network inspect "${JUPYTER_NETWORK_NAME}" >/dev/null 2>&1; then
+  echo "[~] Network ${JUPYTER_NETWORK_NAME} already exists"
+else
+  docker network create --driver overlay "${JUPYTER_NETWORK_NAME}" \
+    || { echo "ERROR: Failed to create network ${JUPYTER_NETWORK_NAME}" >&2; exit 1; }
+  echo "[+] Created network ${JUPYTER_NETWORK_NAME}"
 fi
 
 # Create external volumes (idempotent)
@@ -210,6 +253,12 @@ if [ ! -f "${MCP_DST}/config.json" ]; then
     echo "ERROR: Neither config.json nor config.json.example found in ${MCP_DST}" >&2; exit 1
   fi
 fi
+# Replace an old postgres-mcp-server config; the password is re-injected below
+if sudo grep -q '"postgres-mcp-server"' "${MCP_DST}/config.json" 2>/dev/null; then
+  sudo cp "${MCP_DST}/config.json" "${MCP_DST}/config.json.pre-postgres-mcp.bak"
+  sudo cp "${MCP_DST}/config.json.example" "${MCP_DST}/config.json"
+  echo "[+] Migrated mcposerver config.json from postgres-mcp-server to postgres-mcp (backup: config.json.pre-postgres-mcp.bak)"
+fi
 # Inject postgres password — Python handles all special characters safely, idempotent on re-deploy.
 # Uses rfind('@') to locate the userinfo/host boundary, so passwords containing '@' are handled correctly.
 sudo POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "$(command -v python3)" -c "
@@ -240,6 +289,8 @@ if [ -d "$TIKA_SRC" ]; then
   echo "[*] Syncing tika config to ${TIKA_DST}..."
   sudo mkdir -p "$TIKA_DST"
   sudo rsync -av "$TIKA_SRC/" "$TIKA_DST/"
+  # rsync runs without --delete; drop obsolete Tika 3 files
+  sudo rm -rf "${TIKA_DST}/tika-config.xml" "${TIKA_DST}/customocr"
   echo "[+] Tika config synced"
 fi
 
@@ -250,6 +301,8 @@ if [ -d "$SEARXNG_SRC" ]; then
   echo "[*] Syncing searxng config to ${SEARXNG_DST}..."
   sudo mkdir -p "$SEARXNG_DST"
   sudo rsync -av "$SEARXNG_SRC/" "$SEARXNG_DST/"
+  # obsolete
+  sudo rm -f "${SEARXNG_DST}/uwsgi.ini"
   echo "[+] SearXNG config synced"
 fi
 
@@ -265,6 +318,20 @@ echo "[*] Setting service directory ownership..."
 sudo chown -R 999:999 "${DATA_ROOT}/open-webui/postgres"
 sudo chown -R 977:977 "${DATA_ROOT}/open-webui/searxng"
 sudo chown -R 999:999 "${REDIS_DATA_ROOT:-${DATA_ROOT}}/open-webui/redis/data"
+sudo chown -R 1000:1000 "${DATA_ROOT}/open-webui/jupyter"
+
+# Open WebUI migrations are not rolling-safe: stop all replicas when the tag changes
+OWUI_SERVICE="${STACK_NAME}_openwebui"
+OWUI_IMAGE="ghcr.io/open-webui/open-webui:${OWUI_TAG:-0.12.3}"
+if RUNNING_IMAGE=$(docker service inspect "$OWUI_SERVICE" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' 2>/dev/null); then
+  RUNNING_IMAGE="${RUNNING_IMAGE%%@*}"
+  if [ "$RUNNING_IMAGE" != "$OWUI_IMAGE" ]; then
+    echo "[!] Open WebUI image change: ${RUNNING_IMAGE} -> ${OWUI_IMAGE}"
+    echo "[*] Back up the database first if you have not (README > Upgrading)."
+    echo "[*] Scaling ${OWUI_SERVICE} to 0 so migrations run with no old replica attached..."
+    docker service scale --detach=false "${OWUI_SERVICE}=0"
+  fi
+fi
 
 echo ""
 echo "[*] Deploying stack ${STACK_NAME}..."

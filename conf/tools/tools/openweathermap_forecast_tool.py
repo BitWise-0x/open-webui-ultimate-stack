@@ -9,6 +9,7 @@ license: MIT
 required_open_webui_version: 0.8.11
 """
 
+import os
 import uuid
 from typing import Optional, Dict, Any, Callable, Awaitable, Literal, Tuple, Union
 from datetime import datetime, timezone, timedelta
@@ -587,7 +588,7 @@ async def _fetch_weather_v30(
 class Tools:
     class Valves(BaseModel):
         openweathermap_api_key: str = Field(
-            default="",
+            default=os.getenv("OPENWEATHERMAP_API_KEY", ""),
             description="Your OpenWeatherMap API key.",
             json_schema_extra={"input": {"type": "password"}},
         )

@@ -1623,7 +1623,7 @@ class Tools:
                 images = await image_generations(
                     request=__request__,
                     form_data=GenerateImageForm(prompt=prompt),
-                    user=Users.get_user_by_id(__user__["id"]),
+                    user=await Users.get_user_by_id(__user__["id"]),
                 )
                 if images and len(images) > 0:
                     char_data["image_url"] = images[0]["url"]

@@ -34,7 +34,7 @@ class HFException(Exception):
 class Tools:
     class Valves(BaseModel):
         HF_API_KEY: str = Field(
-            default=None,
+            default=os.getenv("HF_API_KEY"),
             description="HuggingFace API key for accessing the serverless endpoints",
             json_schema_extra={"input": {"type": "password"}},
         )

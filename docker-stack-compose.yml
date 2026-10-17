@@ -8,7 +8,8 @@ x-logging:
 
 services:
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    # Set OWUI_TAG in .env. deploy-swarm.sh scales to 0 on a tag change (DB migrations).
+    image: ghcr.io/open-webui/open-webui:${OWUI_TAG:-0.12.3}
     # No wait script — Open WebUI has internal retry logic for db/redis,
     # and the wait script causes a multi-replica Redis lock race on fresh deploys.
     volumes:
@@ -21,9 +22,10 @@ services:
       CORS_ALLOW_ORIGIN: https://${ROUTER_NAME}.${ROOT_DOMAIN}
     networks:
       - backend
+      - jupyter
       # - traefik-public  # uncomment if using Traefik as ingress
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "curl --silent --fail localhost:8080/health | jq -ne 'input.status == true' || exit 1"]
       interval: 30s
       retries: 15
       start_period: 180s
@@ -34,24 +36,33 @@ services:
         parallelism: 1
         delay: 30s
         order: start-first
+      # Multi-node swarms only:
+      # placement:
+      #   max_replicas_per_node: 1
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 15s
         max_attempts: 5
         window: 120s
-      labels:
-        # Traefik — uncomment and configure if using Traefik as ingress
+      # Traefik: uncomment labels: and the entries below if using Traefik as ingress
+      # labels:
         # - traefik.enable=true
         # - traefik.swarm.network=traefik-public
         # - traefik.http.routers.${ROUTER_NAME}.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`)
-        # - traefik.http.routers.${ROUTER_NAME}.middlewares=chain-oauth@file
+        # - traefik.http.routers.${ROUTER_NAME}.middlewares=chain-oauth@file,${ROUTER_NAME}-nocache
         # - traefik.http.routers.${ROUTER_NAME}.service=${ROUTER_NAME}-svc
+        # - traefik.http.routers.${ROUTER_NAME}-immutable.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`) && PathPrefix(`/_app/immutable`)
+        # - traefik.http.routers.${ROUTER_NAME}-immutable.priority=100
+        # - traefik.http.routers.${ROUTER_NAME}-immutable.middlewares=chain-oauth@file,${ROUTER_NAME}-immutable
+        # - traefik.http.routers.${ROUTER_NAME}-immutable.service=${ROUTER_NAME}-svc
+        # - traefik.http.middlewares.${ROUTER_NAME}-nocache.headers.customresponseheaders.Cache-Control=no-cache
+        # - traefik.http.middlewares.${ROUTER_NAME}-immutable.headers.customresponseheaders.Cache-Control=public, max-age=31536000, immutable
         # - traefik.http.services.${ROUTER_NAME}-svc.loadbalancer.server.port=8080
         # - traefik.constraint=traefik-public
     logging: *default-logging
 
   db:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
     env_file:
       - env/db.env
     user: "999:999"
@@ -76,12 +87,16 @@ services:
         parallelism: 1
         delay: 30s
       restart_policy:
-        condition: on-failure
+        condition: any
+      # Multi-node swarms: pin db to the node that holds its volume
+      # placement:
+      #   constraints:
+      #     - node.hostname == your-db-node
 
     logging: *default-logging
 
   redis:
-    image: docker.io/valkey/valkey:9-alpine
+    image: docker.io/valkey/valkey:9.1-alpine
     # Host tuning: sudo sysctl vm.overcommit_memory=1 (persist in /etc/sysctl.conf)
     environment:
       TZ: America/New_York
@@ -108,11 +123,11 @@ services:
         parallelism: 1
         delay: 30s
       restart_policy:
-        condition: on-failure
+        condition: any
     logging: *default-logging
 
   searxng:
-    image: searxng/searxng:2025.7.10-4b9644e
+    image: searxng/searxng:2026.10.16-8252c0bf6
     user: "977:977"
     entrypoint: ["/bin/sh", "/wait-for-services.sh", "redis:6379", "--", "/usr/local/searxng/entrypoint.sh"]
     env_file: env/searxng.env
@@ -122,18 +137,12 @@ services:
       interval: 30s
       retries: 5
       start_period: 60s
-      test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:8080 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -t1 -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
       timeout: 10s
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-      - DAC_OVERRIDE
     cap_drop:
       - ALL
     volumes:
       - ${DATA_ROOT}/open-webui/searxng/conf/settings.yml:/etc/searxng/settings.yml:ro
-      - ${DATA_ROOT}/open-webui/searxng/conf/uwsgi.ini:/etc/searxng/uwsgi.ini:ro
       - ${DATA_ROOT}/open-webui/searxng/conf/limiter.toml:/etc/searxng/limiter.toml:ro
       - ${DATA_ROOT}/open-webui/scripts/wait-for-services.sh:/wait-for-services.sh:ro
       - searxng:/var/cache/searxng:rw
@@ -146,10 +155,10 @@ services:
         parallelism: 1
         delay: 30s
       restart_policy:
-        condition: on-failure
-      labels:
-        # Traefik — uncomment and configure if using Traefik as ingress
-        # SearXNG is served under /searxng — requires SEARXNG_BASE_URL=/searxng in env/searxng.env
+        condition: any
+      # Traefik: uncomment labels: and the entries below if using Traefik as ingress
+      # SearXNG is served under /searxng: requires SEARXNG_BASE_URL=/searxng in env/searxng.env
+      # labels:
         # - traefik.enable=true
         # - traefik.swarm.network=traefik-public
         # - traefik.http.routers.searxng.rule=Host(`${ROUTER_NAME}.${ROOT_DOMAIN}`) && PathPrefix(`/searxng`)
@@ -164,33 +173,37 @@ services:
         max-file: "1"
 
   tika:
-    image: apache/tika:${TIKA_TAG:-3.2.3.0}-full
-    entrypoint: ["/bin/sh", "-c", "exec java -cp \"/customocr:/tika-server-standard-$${TIKA_VERSION}.jar:/tika-extras/*\" org.apache.tika.server.core.TikaServerCli -h 0.0.0.0 $$0 $$@"]
-    command: -c /tika-config.xml
+    # TIKA_TAG must be 4.x (JSON config)
+    image: apache/tika:${TIKA_TAG:-4.1.0-1}-full
+    command: -c /tika-config.json
     environment:
       TZ: America/New_York
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
     healthcheck:
-      test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:9998/tika || exit 1"]
+      test: ["CMD-SHELL", "wget -nv -t1 -O /dev/null http://127.0.0.1:9998/version || exit 1"]
       interval: 30s
       retries: 5
       start_period: 60s
       timeout: 10s
     volumes:
-      - ${DATA_ROOT}/open-webui/tika/conf/tika-config.xml:/tika-config.xml
-      - ${DATA_ROOT}/open-webui/tika/conf/customocr:/customocr
+      - ${DATA_ROOT}/open-webui/tika/conf/tika-config.json:/tika-config.json:ro
     networks:
       - backend
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 3G
       update_config:
         parallelism: 1
         delay: 30s
       restart_policy:
-        condition: on-failure
+        condition: any
     logging: *default-logging
 
   edgetts:
-    image: travisvn/openai-edge-tts:latest
+    # no version tags upstream; pinned by digest
+    image: travisvn/openai-edge-tts:latest@sha256:af8df8fb39719623cb6c3dbcba87ab65813030d97e20ae436d3161a53d41d72a
     env_file: env/edgetts.env
     environment:
       TZ: America/New_York
@@ -208,11 +221,12 @@ services:
         parallelism: 1
         delay: 30s
       restart_policy:
-        condition: on-failure
+        condition: any
     logging: *default-logging
 
   mcposerver:
-    image: ghcr.io/open-webui/mcpo:latest
+    # mcpo v0.0.20
+    image: ghcr.io/open-webui/mcpo:git-788ff92
     entrypoint: ["/bin/sh", "/wait-for-services.sh", "db:5432", "--"]
     command: ["mcpo", "--config", "/app/conf/config.json"]
     env_file: env/mcp.env
@@ -221,8 +235,9 @@ services:
     healthcheck:
       interval: 30s
       retries: 5
-      start_period: 60s
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/docs || exit 1"]
+      start_period: 120s
+      # /docs answers even when the postgres server failed to start
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/postgres/openapi.json | grep -q execute_sql || exit 1"]
       timeout: 10s
     volumes:
       - ${DATA_ROOT}/open-webui/mcposerver/conf:/app/conf:ro
@@ -235,7 +250,7 @@ services:
         parallelism: 1
         delay: 30s
       restart_policy:
-        condition: on-failure
+        condition: any
     logging: *default-logging
 
   tools-init:
@@ -243,10 +258,7 @@ services:
     env_file: env/tools-init.env
     environment:
       TZ: America/New_York
-      # 300s is needed because openwebui bind ≠ ready: migrations + function
-      # module loading + frontmatter pip installs can run several minutes on
-      # fresh boots (slim base image has no nc, so the wait script falls back
-      # to python3 socket connect — works fine here).
+      # first boot (migrations, function loading, pip installs) can take minutes
       WAIT_TIMEOUT: "300"
     entrypoint: ["bash", "/wait-for-services.sh", "openwebui:8080", "--"]
     command: ["bash", "-c", "apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1 && exec bash /scripts/install-tools.sh"]
@@ -264,9 +276,43 @@ services:
         max_attempts: 5
     logging: *default-logging
 
+  jupyter:
+    # Code interpreter kernel. One shared kernel: trusted users only.
+    # Isolated network, no ingress, outbound internet allowed.
+    image: quay.io/jupyter/scipy-notebook:2026-01-05
+    # allow_remote_access: Open WebUI connects with a non-local Host header (403 otherwise)
+    command:
+      - start-notebook.py
+      - --ServerApp.allow_remote_access=True
+      - --ServerApp.ip=0.0.0.0
+      - --ServerApp.disable_check_xsrf=True
+    env_file: env/jupyter.env
+    environment:
+      TZ: America/New_York
+    cap_drop:
+      - ALL
+    volumes:
+      - ${DATA_ROOT}/open-webui/jupyter:/home/jovyan/work
+    networks:
+      - jupyter
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+      update_config:
+        parallelism: 1
+        delay: 30s
+      restart_policy:
+        condition: any
+    logging: *default-logging
+
 networks:
   backend:
     name: ${BACKEND_NETWORK_NAME}
+    external: true
+  jupyter:
+    name: ${JUPYTER_NETWORK_NAME:-open-webui_jupyter}
     external: true
   # traefik-public:  # uncomment if using Traefik as ingress
   #   external: true

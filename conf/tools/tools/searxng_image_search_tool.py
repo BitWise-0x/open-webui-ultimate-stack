@@ -7,6 +7,7 @@ license: MIT
 description: Tool to search and retrieve photos from SearXNG image search
 """
 
+import os
 import aiohttp
 import json
 from pydantic import BaseModel, Field
@@ -34,7 +35,7 @@ class EventEmitter:
 class Tools:
     class Valves(BaseModel):
         SEARXNG_ENGINE_API_BASE_URL: str = Field(
-            default="http://searxng:8080/search",
+            default=os.getenv("SEARXNG_IMAGE_SEARCH_URL", "http://searxng:8080/search"),
             description="The base URL for the SearXNG search engine API.",
         )
         RETURNED_IMAGES_NO: int = Field(

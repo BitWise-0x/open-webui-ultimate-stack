@@ -173,7 +173,7 @@ class Pipe:
         )
         COMFYUI_API_KEY: str = Field(
             title="ComfyUI API Key",
-            default="",
+            default=os.getenv("COMFYUI_API_KEY", ""),
             description="API key for ComfyUI authentication (Bearer token). Leave empty if not required.",
             json_schema_extra={"input": {"type": "password"}},
         )

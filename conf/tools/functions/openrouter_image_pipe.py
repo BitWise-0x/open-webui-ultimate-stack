@@ -12,6 +12,7 @@ Streaming completions only
 Citations and image event emission. Images are saved to the owui backend and URLs are emitted (not base64).
 """
 
+import os
 import aiohttp
 import mimetypes
 import io
@@ -31,7 +32,7 @@ import uuid
 class Pipe:
     class Valves(BaseModel):
         API_KEY: str = Field(
-            default="", description="OpenRouter API key",
+            default=os.getenv("OPENROUTER_API_KEY", ""), description="OpenRouter API key",
             json_schema_extra={"input": {"type": "password"}},
         )
         ALLOWED_MODELS: List[str] = Field(

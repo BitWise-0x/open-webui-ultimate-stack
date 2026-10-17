@@ -22,6 +22,8 @@ Local path: `conf/tools/` (tools, functions, filters, extras subdirectories).
 > **Automated:** The MCPO proxy service and its PostgreSQL MCP connection are deployed automatically via `docker-stack-compose.yml` + `config.json`. The `TOOL_SERVER_CONNECTIONS` env var in `owui.env` registers the MCPO endpoint with Open WebUI on startup.
 >
 > **Manual:** Native Streamable HTTP connections (GitHub, gitmcp.io) must be added through the Admin UI — Open WebUI does not support pre-configuring these via env vars or API.
+>
+> **Postgres MCP server:** `postgres-mcp` in restricted (read-only) mode. Admin-only by default.
 
 <table>
 <tr>
@@ -29,7 +31,7 @@ Local path: `conf/tools/` (tools, functions, filters, extras subdirectories).
 
 #### GitHub MCP
 
-- **Admin Panel** > Settings > External Tools > + (Add Connection)
+- **Settings > Admin** > External Tools > + (Add Connection)
 - Type: **MCP (Streamable HTTP)**
 - URL: `https://api.githubcopilot.com/mcp/`
 - Auth: **Bearer** + your GitHub PAT
@@ -41,7 +43,7 @@ Local path: `conf/tools/` (tools, functions, filters, extras subdirectories).
 
 #### gitmcp.io
 
-- **Admin Panel** > Settings > External Tools > + (Add Connection)
+- **Settings > Admin** > External Tools > + (Add Connection)
 - Type: **MCP (Streamable HTTP)**
 - URL: `https://gitmcp.io/docs`
 - Auth: None
@@ -55,22 +57,100 @@ Local path: `conf/tools/` (tools, functions, filters, extras subdirectories).
 
 ### Native Function Calling (Agentic Mode)
 
-<img src="https://img.shields.io/badge/automated-ENABLE__PERSISTENT__CONFIG-4CAF50?style=flat-square" alt="Persistent config automated"/>
-<img src="https://img.shields.io/badge/manual-per--model_toggle-FF9800?style=flat-square" alt="Per-model toggle manual"/>
+<img src="https://img.shields.io/badge/automated-native_by_default-4CAF50?style=flat-square" alt="Native by default"/>
+<img src="https://img.shields.io/badge/manual-opt--out_to_Legacy-FF9800?style=flat-square" alt="Opt-out manual"/>
 
-> **Automated:** `ENABLE_PERSISTENT_CONFIG=true` is set in `env/owui.env`, which enables the DB-backed storage mechanism so settings persist across restarts.
+> **Automated:** Native tool calling is the default for every model.
 >
-> **Manual:** The actual per-model `Function Calling = "Native"` toggle must be set in the Admin UI for each model individually. There is no env var or API to pre-configure this.
-
-Per-model setting — no global toggle. Only needs to be done once per model (persists to DB).
+> **Manual:** Switch a model to **Legacy** (prompt-based) only if it has no native tool support:
 
 | Setting | Path |
 |---------|------|
-| Per-model (persistent) | Admin Panel > Settings > **Models** > select model > **Advanced Parameters** > Function Calling = **"Native"** |
-| Per-chat (session only) | Chat Controls (gear icon) > Advanced Params > Function Calling = **"Native"** |
+| Per-model (persistent) | Settings > Admin > **Models** > select model > **Advanced Parameters** > Function Calling = **"Legacy"** |
+| Global default | Settings > Admin > Models > **Default model parameters** |
+| Per-chat (session only) | Chat Controls (gear icon) > Advanced Params > Function Calling |
 
-> Enables built-in tools: web search, knowledge base queries, notes/memory, image gen.
-> Works best with frontier models (GPT-4.1+, Claude 4+, Gemini 2.5+).
+> Native mode enables built-in tools: web search, knowledge base queries, notes/memory, image gen, skills, tasks.
+> `env/owui.env` also turns on sub-agents, Tool Search and context compaction (see *Agentic features* there).
+> Works best with frontier models (Claude, GPT, Gemini) and recent tool-capable Ollama models.
+
+<br>
+
+### Anthropic (Claude) Connection
+
+<img src="https://img.shields.io/badge/automated-env_seed_on_fresh_DB-4CAF50?style=flat-square" alt="Env seed on fresh DB"/>
+<img src="https://img.shields.io/badge/manual-add_once_on_existing_installs-FF9800?style=flat-square" alt="Add once on existing installs"/>
+
+> **Automated (fresh install):** `OPENAI_API_BASE_URLS` in `env/owui.env` lists OpenAI, OpenRouter and Anthropic, and `OPENAI_API_KEYS` holds the three keys in the same order. Open WebUI recognizes the `api.anthropic.com` URL: it lists Claude models natively and sends the key as `x-api-key`.
+>
+> **Manual (existing install):** with `ENABLE_PERSISTENT_CONFIG=true` those env vars only seed a fresh database, so add the connection once in the UI. It persists from then on.
+
+1. **Settings > Admin > Connections > OpenAI API > +** (Add Connection)
+2. URL: `https://api.anthropic.com/v1`, Auth: **Bearer**, Key: your `sk-ant-...` key from <https://console.anthropic.com/settings/keys>
+3. Optional: a **Prefix ID** (e.g. `anthropic`) and a **Model IDs** allowlist; empty means every model the key can see
+4. Save, then check that the Claude models appear in the model picker.
+5. Optional: set **Settings > Admin > Interface > Task model for external models** to a small Claude model, so titles, tags and follow-ups for Claude chats stay cheap.
+
+> **Cost guard:** `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS=20` in `env/owui.env` caps tool-call loops per response (upstream default is 256).
+
+Open WebUI also *serves* an Anthropic-compatible Messages API at `/api/v1/messages` (plus `/api/v1/messages/count_tokens` and `/api/v1/models`), routed to any model it has. Create a key under **Settings > Account > API Keys** (`ENABLE_API_KEYS=true` is set in `env/owui.env`) and point a client at `http://<host>:3000/api`. If Open WebUI sits behind a browser-based forward-auth proxy (such as the commented Traefik `chain-oauth` labels), API clients cannot complete that login and need a route that skips it.
+
+<br>
+
+### Code Interpreter (Jupyter)
+
+<img src="https://img.shields.io/badge/automated-jupyter_service_%2B_token-4CAF50?style=flat-square" alt="Jupyter automated"/>
+<img src="https://img.shields.io/badge/manual-switch_engine_on_existing_installs-FF9800?style=flat-square" alt="Engine switch manual"/>
+
+> **Automated:** the `jupyter` service runs `quay.io/jupyter/scipy-notebook`. `bootstrap.sh` generates `JUPYTER_TOKEN` in `env/jupyter.env` and copies it into `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN` in `env/owui.env`. On a fresh install the code interpreter uses it immediately.
+>
+> **Manual (existing install):** set **Settings > Admin > Code Execution > Code Interpreter engine** to **Jupyter**, URL `http://jupyter:8888`, auth **Token**, and paste the value of `JUPYTER_TOKEN` from `env/jupyter.env`.
+
+- One shared kernel with no per-user isolation. Give access to admins and trusted users only.
+- The kernel has its own network: it cannot reach the database, Redis or the MCP proxy, and it has no published port. It does have outbound internet access (pip installs, fetching data).
+- Files the model writes persist in the `jupyter_work` volume (standalone) or `${DATA_ROOT}/open-webui/jupyter` (Swarm).
+- The **run** button on code blocks stays on Pyodide (sandboxed in the browser); only the model-driven interpreter uses Jupyter.
+
+<br>
+<br>
+
+## Upgrading
+
+<img src="https://img.shields.io/badge/automated-scale--to--0_on_tag_change_(Swarm)-4CAF50?style=flat-square" alt="Automated scale to 0"/>
+<img src="https://img.shields.io/badge/manual-backup_%2B_bump_OWUI__TAG-FF9800?style=flat-square" alt="Backup manual"/>
+
+The Open WebUI image is pinned with `OWUI_TAG` (default `0.12.3`, override in `.env`). Most releases carry database migrations, and upstream does **not** support rolling updates across them.
+
+1. Read the release notes: <https://github.com/open-webui/open-webui/releases>
+2. Back up Postgres:
+   - Standalone: `docker compose exec db pg_dump -U postgres openwebui | gzip > owui-$(date +%F).sql.gz`
+   - Swarm: `docker exec $(docker ps -qf name=open-webui_db) pg_dump -U postgres openwebui | gzip > owui-$(date +%F).sql.gz` (on the node running `db`)
+3. Set `OWUI_TAG` in `.env`, then re-run `./bootstrap.sh` (or `./bootstrap.sh --swarm`). On Swarm, `deploy-swarm.sh` scales `openwebui` to 0 when the tag changes, so the new version migrates with no old replica attached. Expect a short outage.
+
+### Upgrading from a pre-0.12 version of this stack
+
+Pull the repository, then re-run `bootstrap.sh`. It handles these automatically:
+
+- creates `env/jupyter.env`, generates the token, and adds `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN` to your existing `env/owui.env`
+- migrates `conf/mcposerver/config.json` from `postgres-mcp-server` to `postgres-mcp` (backup kept as `config.json.pre-postgres-mcp.bak`)
+- stops if `.env` still pins Tika 3 (`TIKA_TAG=3.x`); change it to `4.1.0-1` or delete the line
+- on Swarm: creates the `jupyter` overlay network, removes leftover Tika 3 and uWSGI config files from `DATA_ROOT`, and scales `openwebui` to 0 for the image change
+
+Your existing `env/*.env` files are not overwritten. Compare them with the updated `env/*.env.example` files and merge new or renamed keys you want, in particular in `env/owui.env`: `ENABLE_API_KEYS` (was `ENABLE_API_KEY`), `ENABLE_LOCAL_WEB_FETCH` (was `ENABLE_RAG_LOCAL_WEB_FETCH`), `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS` (was `..._RETRIES`), `TIKA_SERVER_VERSION=4`, the `CODE_INTERPRETER_*` block, and the three-connection `OPENAI_API_*` block. In `env/searxng.env`, the `SEARXNG_UWSGI_*` settings no longer do anything (the image runs Granian).
+
+`ENABLE_PERSISTENT_CONFIG=true` means env values only seed a fresh database. On an existing install, change these once in the UI:
+
+| # | Setting | Where | Why |
+|---|---------|-------|-----|
+| 1 | Tika server version = **4.x** | Settings > Admin > Documents | The Tika image is now 4.1. A 3/4 mismatch fails every upload, so change this as soon as the new stack is up |
+| 2 | Relevance threshold = **0** | Settings > Admin > Documents | Earlier examples set `RAG_RELEVANCE_THRESHOLD=1`, the maximum score, which filters out nearly all results |
+| 3 | Hybrid search on, embedding batch size 16 (optional) | Settings > Admin > Documents | Match the current `env/owui.env.example` |
+| 4 | postgres tool server: **enable**, Auth = **None** | Settings > Admin > External Tools | The old `TOOL_SERVER_CONNECTIONS` seed lacked `config.enable`, so 0.12 never loads it |
+| 5 | Enable API Keys | Settings > Admin > Authentication | `ENABLE_API_KEY` was misnamed and is ignored |
+| 6 | Code Interpreter engine = **Jupyter** | Settings > Admin > Code Execution | See [Code Interpreter (Jupyter)](#code-interpreter-jupyter) |
+| 7 | Anthropic connection (optional) | Settings > Admin > Connections | See [Anthropic (Claude) Connection](#anthropic-claude-connection) |
+
+Search results will change: SearXNG upstream removed reddit and searchcode, and disabled qwant, startpage and several image engines. Google is re-enabled in `conf/searxng/settings.yml`. The `veo3_pipe` function was removed from `conf/tools/`; its record stays in Open WebUI until you delete it under Settings > Admin > Functions.
 
 <br>
 <br>
@@ -80,9 +160,9 @@ Per-model setting — no global toggle. Only needs to be done once per model (pe
 <img src="https://img.shields.io/badge/automated-service_URLs-4CAF50?style=flat-square" alt="Service URLs automated"/>
 <img src="https://img.shields.io/badge/manual-API_keys-FF9800?style=flat-square" alt="API keys manual"/>
 
-> **Automated:** Service URLs (ComfyUI, Ollama, WebUI) are pre-set in `env/owui.env` and injected into the container at deploy time. Tools read these via `os.getenv()` in their Valve defaults. (SearXNG's URL is a static Valve default, not env-driven.)
+> **Automated:** Service URLs (ComfyUI, Ollama, SearXNG, WebUI) are pre-set in `env/owui.env` and injected into the container at deploy time. Tools read these via `os.getenv()` in their Valve defaults.
 >
-> **Manual:** API keys for third-party services are commented out by default. Uncomment and populate them in `env/owui.env` before deploying, or set them after deploy and restart the stack.
+> **Manual:** API keys for third-party services are commented out by default. Uncomment and populate them in `env/owui.env` before deploying, or set them after deploy and restart the stack. A Valve default only applies until that Valve is saved in the UI; after that the stored value wins.
 
 ### Service URLs
 
@@ -90,14 +170,15 @@ Per-model setting — no global toggle. Only needs to be done once per model (pe
 |----------|---------|
 | `COMFYUI_API_URL` | All ComfyUI tools + Flux Kontext pipe |
 | `OLLAMA_BASE_URL` | All tools with model unloading |
-| `WEBUI_URL` | Native Image Gen tool |
+| `SEARXNG_IMAGE_SEARCH_URL` | SearXNG Image Search tool |
+| `WEBUI_URL` | Native Image Gen tool (image links) |
 | `OPENROUTER_API_KEY` | OpenRouter Image pipe |
+| `OPENAI_API_KEYS` | OpenAI, OpenRouter and Anthropic connection keys (fresh-install seed) |
 
 ### API Keys (commented out — uncomment when needed)
 
 | Variable | Tool | Where to Get It |
 |----------|------|-----------------|
-| `GOOGLE_API_KEY` | Veo3 video generation pipe | [Google AI Studio](https://aistudio.google.com/) |
 | `YOUTUBE_API_KEY` | YouTube Search tool, Mopidy controller | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) — enable YouTube Data API v3 |
 | `PEXELS_API_KEY` | Pexels Image/Video Search tool | [Pexels API](https://www.pexels.com/api/) (free) |
 | `HF_API_KEY` | HuggingFace Image Generator tool | [HuggingFace Settings](https://huggingface.co/settings/tokens) |
@@ -258,11 +339,6 @@ Several tools support `unload_ollama_models` (default: off). When enabled, tools
 </td>
 <td valign="top" width="50%">
 
-#### Veo3 Pipe (Google Video Generation)
-- Requires `GOOGLE_API_KEY` with Gemini API access
-- Supports text-to-video and image-to-video (single image only)
-- Optional: vision model prompt enhancement
-
 #### Mopidy Music Controller
 - Requires [Mopidy](https://mopidy.com/) + [Mopidy-Iris](https://github.com/jaedb/Iris) running
 - Set `mopidy_url` valve (default: `http://localhost:6680/mopidy/rpc`)
@@ -339,16 +415,12 @@ default="http://localhost:8188"
 default=os.getenv("COMFYUI_API_URL", "http://localhost:8188")
 ```
 
-Only three env vars are wired into Valve defaults this way:
+Do the same for API keys (`default=os.getenv("PEXELS_API_KEY", "")`) and add `import os`
+where missing.
 
 > **Env vars used in tool Valve defaults:**
-> `COMFYUI_API_URL` (all ComfyUI tools + Flux Kontext pipe), `OLLAMA_BASE_URL`
-> (tools with model unloading), `WEBUI_URL` (Native Image Gen).
+> `COMFYUI_API_URL`, `COMFYUI_API_KEY`, `OLLAMA_BASE_URL`, `SEARXNG_IMAGE_SEARCH_URL`, `WEBUI_URL`,
+> `OPENROUTER_API_KEY`, `YOUTUBE_API_KEY`, `PEXELS_API_KEY`, `HF_API_KEY`,
+> `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `OPENWEATHERMAP_API_KEY`, `TAVILY_API_KEY`, `RAPIDAPI_KEY`
 
-All other service credentials — `COMFYUI_API_KEY`, `OPENROUTER_API_KEY`, `YOUTUBE_API_KEY`,
-`PEXELS_API_KEY`, and the rest — are **not** env-driven; enter them directly in each
-tool's Valves in the Admin Panel.
-
-> **Open WebUI compatibility:** the current tools require **Open WebUI 0.9.1+** (they
-> use the async `Users.get_user_by_id` and the 0.9.x web-search env vars). Pin
-> `ghcr.io/open-webui/open-webui` accordingly if you are not tracking `main`.
+> **Open WebUI compatibility:** the bundled tools target **Open WebUI 0.12** (the pinned `OWUI_TAG`).

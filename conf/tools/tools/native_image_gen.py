@@ -117,8 +117,6 @@ class Tools:
             )
 
         try:
-            if model:
-                __request__.app.state.config.IMAGE_GENERATION_MODEL = model
             images = await image_generations(
                 request=__request__,
                 form_data=GenerateImageForm(prompt=prompt, model=model),
@@ -134,7 +132,7 @@ class Tools:
             bare_urls: list[str] = []
             markdown_attachments: list[str] = []
             for image in images:
-                url = f"{os.getenv('WEBUI_URL', '')}{image['url']}"
+                url = f"{os.getenv('WEBUI_URL', '').rstrip('/')}{image['url']}"
                 bare_urls.append(url)
                 img_html = f'<img src="{url}" style="max-width:100%; height:auto; display:block; border:none; margin:0 0 8px 0; padding:0; border-radius:12px;" />'
                 markdown_attachments.append(img_html)

@@ -21,9 +21,8 @@
 #   WAIT_INTERVAL  Seconds between retry attempts (default: 2)
 #
 # TCP check methods (auto-detected in order of preference):
-#   1. nc -z          (netcat, available in openwebui/debian images)
-#   2. python3/python (socket connect, available in searxng/mcpo/tools-init)
-#   3. /dev/tcp       (bash built-in, only works if invoked with bash)
+#   1. python3/python (socket connect, available in searxng/mcpo/tools-init)
+#   2. nc -z          (only if this nc supports -z)
 #
 # Notes:
 #   - Targets are checked sequentially, not in parallel
@@ -57,13 +56,13 @@ if [ -z "$TARGETS" ]; then
   exec "$@"
 fi
 
-# Detect available TCP check method
-if command -v nc >/dev/null 2>&1; then
-  check_port() { nc -z "$1" "$2" 2>/dev/null; }
-elif command -v python3 >/dev/null 2>&1; then
-  check_port() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); s.connect((sys.argv[1],int(sys.argv[2]))); s.close()" "$1" "$2" 2>/dev/null; }
+# Detect available TCP check method (python first: some images ship a BusyBox nc without -z)
+if command -v python3 >/dev/null 2>&1; then
+  check_port() { python3 -c "import socket,sys; socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=1).close()" "$1" "$2" 2>/dev/null; }
 elif command -v python >/dev/null 2>&1; then
-  check_port() { python -c "import socket,sys; s=socket.socket(); s.settimeout(1); s.connect((sys.argv[1],int(sys.argv[2]))); s.close()" "$1" "$2" 2>/dev/null; }
+  check_port() { python -c "import socket,sys; socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=1).close()" "$1" "$2" 2>/dev/null; }
+elif command -v nc >/dev/null 2>&1 && ! nc -z 127.0.0.1 1 2>&1 | grep -qiE "invalid option|unrecognized option|usage"; then
+  check_port() { nc -z "$1" "$2" 2>/dev/null; }
 else
   echo "[wait] WARNING: No TCP check tool found (nc, python3, python). Skipping wait." >&2
   exec "$@"

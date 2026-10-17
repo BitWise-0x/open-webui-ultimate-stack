@@ -3,7 +3,7 @@ title: Semantic Router Filter
 author: Haervwe
 author_url: https://github.com/Haervwe
 funding_url: https://github.com/Haervwe/open-webui-tools
-version: 2.0.1
+version: 2.0.2
 required_open_webui_version: 0.9.1
 description: Filter that acts a model router, using model descriptions and capabilities
 (make sure to set them in the models you want to be presented to the router)
@@ -1238,11 +1238,11 @@ class Filter:
 
             model_data = selected_model_full
             meta = model_data.get("meta", {})
-            knowledge = meta.get("knowledge", [])
+            knowledge = meta.get("knowledge")
+            if not isinstance(knowledge, list):
+                knowledge = []
 
-            self._routed_model_knowledge = (
-                knowledge if isinstance(knowledge, list) else []
-            )
+            self._routed_model_knowledge = knowledge
             self._routed_model_tools = meta.get("toolIds", [])
 
             if self.valves.debug:
@@ -1310,13 +1310,16 @@ class Filter:
                 logger.debug(
                     f"  body['files'] structure: {json.dumps(body_files, indent=2, default=str)}"
                 )
-                knowledge_in_body = (
+                meta_dict = (
                     new_body.get("metadata", {})
                     .get("model", {})
                     .get("info", {})
                     .get("meta", {})
-                    .get("knowledge", [])
                 )
+                knowledge_in_body = meta_dict.get("knowledge") if isinstance(meta_dict, dict) else []
+                if not isinstance(knowledge_in_body, list):
+                    knowledge_in_body = []
+
                 logger.debug(f"  Knowledge collections count: {len(knowledge_in_body)}")
                 logger.debug(
                     f"  Knowledge structure: {json.dumps(knowledge_in_body, indent=2, default=str)}"

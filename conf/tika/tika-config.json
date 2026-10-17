@@ -1,0 +1,56 @@
+{
+  // Tika 4 server config. Unknown keys fail startup.
+
+  // Required when starting with -c
+  "server": {
+    "port": 9998
+  },
+
+  // A "parsers" list loads only what it names; "default-parser" keeps the rest.
+  "parsers": [
+    {
+      "pdf-parser": {
+        "extractInlineImages": true,
+        "pages": {
+          // use the PDF's text layer; OCR a page only when it has almost none
+          "text": "AUTO",
+          "render": {
+            "dpi": 300,
+            "imageType": "RGB"
+          }
+        }
+      }
+    },
+    {
+      "default-parser": {}
+    }
+  ],
+
+  "text-recognizers": [
+    {
+      "tesseract-ocr-parser": {
+        // language packs in the -full image: eng ita fra spa deu jpn
+        "language": "eng+spa+fra+deu+ita",
+        "timeoutMillis": 900000,
+        "minFileSizeToOcr": 1,
+        // ImageMagick preprocessing made OCR about 7x slower without better results
+        "enableImagePreprocessing": false,
+        "applyRotation": false
+      }
+    }
+  ],
+
+  "parse-context": {
+    "timeout-limits": {
+      "totalTaskTimeoutMillis": 900000
+    }
+  },
+
+  // Parsing runs in forked JVMs; each takes its own heap from the container limit.
+  "pipes": {
+    "numClients": 1,
+    "forkedJvmArgs": ["-Xmx1536m"],
+    // queue a second upload instead of returning 429 after 60s
+    "maxWaitForClientMillis": 900000
+  }
+}

@@ -1,40 +1,30 @@
-[real_ip]
+# Overrides merged onto searx/limiter.toml
+# Docs: https://docs.searxng.org/admin/searx.limiter.html
 
-# Number of values to trust for X-Forwarded-For.
-
-x_for = 1
-
-# The prefix defines the number of leading bits in an address that are compared
-# to determine whether or not an address is part of a (client) network.
+[botdetection]
 
 ipv4_prefix = 32
 ipv6_prefix = 48
 
+# Client IP is taken from X-Forwarded-For only when the peer is listed here
+# (even with the limiter off). Narrow 10.0.0.0/8 to your proxy's subnet if known.
+trusted_proxies = [
+  '127.0.0.0/8',
+  '::1',
+  '10.0.0.0/8',
+]
+
 [botdetection.ip_limit]
 
-# To get unlimited access in a local network, by default link-local addresses
-# (networks) are not monitored by the ip_limit
 filter_link_local = false
-
-# activate link_token method in the ip_limit method
 link_token = false
 
 [botdetection.ip_lists]
 
-# In the limiter, the ip_lists method has priority over all other methods -> if
-# an IP is in the pass_ip list, it has unrestricted access and it is also not
-# checked if e.g. the "user agent" suggests a bot (e.g. curl).
+block_ip = []
 
-block_ip = [
-  # '93.184.216.34',  # IPv4 of example.org
-  # '257.1.1.1',      # invalid IP --> will be ignored, logged in ERROR class
-]
-
+# If you enable the limiter, add the backend subnet (FORWARDED_ALLOW_IPS) here
 pass_ip = [
-  # '192.168.0.0/16',      # IPv4 private network
-  # 'fe80::/10'            # IPv6 linklocal / wins over botdetection.ip_limit.filter_link_local
 ]
 
-# Activate passlist of (hardcoded) IPs from the SearXNG organization,
-# e.g. `check.searx.space`.
 pass_searxng_org = true

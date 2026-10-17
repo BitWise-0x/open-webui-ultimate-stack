@@ -10,6 +10,7 @@ version: 0.5.0
 required_open_webui_version: 0.9.1
 """
 
+import os
 from datetime import datetime 
 import logging
 import random
@@ -247,7 +248,7 @@ class Pipe:
             default=None, description="Model to use (model id from ollama)"
         )
         TAVILY_API_KEY: str = Field(
-            default="", description="API key for Tavily search service",
+            default=os.getenv("TAVILY_API_KEY", ""), description="API key for Tavily search service",
             json_schema_extra={"input": {"type": "password"}},
         )
         MAX_SEARCH_RESULTS: int = Field(

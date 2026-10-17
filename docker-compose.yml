@@ -8,7 +8,8 @@ x-logging:
 
 services:
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    # Override with OWUI_TAG in .env; back up the database first (DB migrations)
+    image: ghcr.io/open-webui/open-webui:${OWUI_TAG:-0.12.3}
     env_file: env/owui.env
     environment:
       TZ: America/New_York
@@ -18,8 +19,9 @@ services:
       - "3000:8080"
     networks:
       - backend
+      - jupyter
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "curl --silent --fail localhost:8080/health | jq -ne 'input.status == true' || exit 1"]
       interval: 30s
       retries: 15
       start_period: 180s
@@ -39,7 +41,7 @@ services:
     logging: *default-logging
 
   db:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
     env_file: env/db.env
     user: "999:999"
     environment:
@@ -61,7 +63,7 @@ services:
     logging: *default-logging
 
   redis:
-    image: docker.io/valkey/valkey:9-alpine
+    image: docker.io/valkey/valkey:9.1-alpine
     # Host tuning: sudo sysctl vm.overcommit_memory=1 (persist in /etc/sysctl.conf)
     environment:
       TZ: America/New_York
@@ -86,28 +88,22 @@ services:
     logging: *default-logging
 
   searxng:
-    image: searxng/searxng:2025.7.10-4b9644e
+    image: searxng/searxng:2026.10.16-8252c0bf6
     user: "977:977"
     env_file: env/searxng.env
     environment:
       TZ: America/New_York
     healthcheck:
-      test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:8080 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -t1 -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
       interval: 30s
       retries: 5
       start_period: 60s
       timeout: 10s
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-      - DAC_OVERRIDE
     cap_drop:
       - ALL
     volumes:
       - searxng_cache:/var/cache/searxng:rw
       - ./conf/searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - ./conf/searxng/uwsgi.ini:/etc/searxng/uwsgi.ini:ro
       - ./conf/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
     networks:
       - backend
@@ -131,27 +127,32 @@ services:
         max-file: "1"
 
   tika:
-    image: apache/tika:${TIKA_TAG:-3.2.3.0}-full
-    entrypoint: ["/bin/sh", "-c", "exec java -cp \"/customocr:/tika-server-standard-$${TIKA_VERSION}.jar:/tika-extras/*\" org.apache.tika.server.core.TikaServerCli -h 0.0.0.0 $$0 $$@"]
-    command: -c /tika-config.xml
+    # TIKA_TAG must be 4.x (JSON config)
+    image: apache/tika:${TIKA_TAG:-4.1.0-1}-full
+    command: -c /tika-config.json
     environment:
       TZ: America/New_York
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
     healthcheck:
-      test: ["CMD-SHELL", "wget -nv -t1 --spider http://127.0.0.1:9998/tika || exit 1"]
+      test: ["CMD-SHELL", "wget -nv -t1 -O /dev/null http://127.0.0.1:9998/version || exit 1"]
       interval: 30s
       retries: 5
       start_period: 60s
       timeout: 10s
     volumes:
-      - ./conf/tika/tika-config.xml:/tika-config.xml
-      - ./conf/tika/customocr:/customocr
+      - ./conf/tika/tika-config.json:/tika-config.json:ro
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 3G
     restart: unless-stopped
     logging: *default-logging
 
   edgetts:
-    image: travisvn/openai-edge-tts:latest
+    # no version tags upstream; pinned by digest
+    image: travisvn/openai-edge-tts:latest@sha256:af8df8fb39719623cb6c3dbcba87ab65813030d97e20ae436d3161a53d41d72a
     env_file: env/edgetts.env
     environment:
       TZ: America/New_York
@@ -167,21 +168,26 @@ services:
     logging: *default-logging
 
   mcposerver:
-    image: ghcr.io/open-webui/mcpo:latest
+    # mcpo v0.0.20
+    image: ghcr.io/open-webui/mcpo:git-788ff92
     env_file: env/mcp.env
     environment:
       TZ: America/New_York
     command: ["mcpo", "--config", "/app/conf/config.json"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/docs || exit 1"]
+      # /docs answers even when the postgres server failed to start
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/postgres/openapi.json | grep -q execute_sql || exit 1"]
       interval: 30s
       retries: 5
-      start_period: 60s
+      start_period: 120s
       timeout: 10s
     volumes:
       - ./conf/mcposerver:/app/conf:ro
     networks:
       - backend
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     logging: *default-logging
 
@@ -207,8 +213,36 @@ services:
     restart: "on-failure:5"
     logging: *default-logging
 
+  jupyter:
+    # Code interpreter kernel. One shared kernel: trusted users only.
+    # Isolated network, no published port, outbound internet allowed.
+    image: quay.io/jupyter/scipy-notebook:2026-01-05
+    # allow_remote_access: Open WebUI connects with a non-local Host header (403 otherwise)
+    command:
+      - start-notebook.py
+      - --ServerApp.allow_remote_access=True
+      - --ServerApp.ip=0.0.0.0
+      - --ServerApp.disable_check_xsrf=True
+    env_file: env/jupyter.env
+    environment:
+      TZ: America/New_York
+    cap_drop:
+      - ALL
+    volumes:
+      - jupyter_work:/home/jovyan/work
+    networks:
+      - jupyter
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    restart: unless-stopped
+    logging: *default-logging
+
 networks:
   backend:
+    driver: bridge
+  jupyter:
     driver: bridge
 
 volumes:
@@ -216,3 +250,4 @@ volumes:
   postgres_data:
   redis_data:
   searxng_cache:
+  jupyter_work:

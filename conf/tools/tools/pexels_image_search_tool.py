@@ -8,6 +8,7 @@ version: 1.1.2
 license: MIT
 """
 
+import os
 import aiohttp
 from typing import Any, Optional, Callable, Awaitable, Dict
 from pydantic import BaseModel, Field
@@ -202,7 +203,7 @@ def format_video_results(data: Dict[str, Any], query: str) -> str:
 class Tools:
     class Valves(BaseModel):
         PEXELS_API_KEY: str = Field(
-            default="",
+            default=os.getenv("PEXELS_API_KEY", ""),
             description="Pexels API key for accessing photos and videos. Get yours free at https://www.pexels.com/api/",
             json_schema_extra={"input": {"type": "password"}},
         )
