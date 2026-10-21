@@ -14,16 +14,82 @@ Local path: `conf/tools/` (tools, functions, filters, extras subdirectories).
 
 ## Manual Admin UI Steps
 
-### MCP Connections (Native Streamable HTTP)
+### MCP Tool Servers
 
 <img src="https://img.shields.io/badge/automated-MCPO_%2B_TOOL__SERVER__CONNECTIONS-4CAF50?style=flat-square" alt="MCPO automated"/>
 <img src="https://img.shields.io/badge/manual-native_Streamable_HTTP-FF9800?style=flat-square" alt="Streamable HTTP manual"/>
 
-> **Automated:** The MCPO proxy service and its PostgreSQL MCP connection are deployed automatically via `docker-stack-compose.yml` + `config.json`. The `TOOL_SERVER_CONNECTIONS` env var in `owui.env` registers the MCPO endpoint with Open WebUI on startup.
+> **Automated:** The `mcposerver` service (mcpo) and its PostgreSQL MCP server deploy with `docker-compose.yml` (standalone) or `docker-stack-compose.yml` (Swarm) plus `conf/mcposerver/config.json`, which `bootstrap.sh` creates from `config.json.example`. The `TOOL_SERVER_CONNECTIONS` env var in `env/owui.env` registers the mcpo endpoint with Open WebUI. With `ENABLE_PERSISTENT_CONFIG=true` it only seeds a fresh database; after that the entry lives in Postgres.
 >
-> **Manual:** Native Streamable HTTP connections (GitHub, gitmcp.io) must be added through the Admin UI — Open WebUI does not support pre-configuring these via env vars or API.
->
-> **Postgres MCP server:** `postgres-mcp` 0.3.0 in restricted (read-only) mode. Admin-only by default. `uvx` starts it with `--overrides /app/conf/uv-overrides.txt`, which pins `pglast` to 7.21: 0.3.0 pins `pglast==7.2.0`, which is no longer on PyPI, so without the override the server cannot install and its tools never load.
+> **Manual:** Native Streamable HTTP servers (GitHub, gitmcp.io) are added by hand in the Admin UI. The `TOOL_SERVER_CONNECTIONS` list also accepts `"type": "mcp"` entries (Open WebUI 0.12.3 `backend/open_webui/main.py`), but this stack seeds only the mcpo entry.
+
+| Server | Transport into Open WebUI | Endpoint | Registered by | Setup |
+|--------|---------------------------|----------|---------------|-------|
+| `postgres` (via mcpo) | OpenAPI (mcpo wraps the stdio MCP server) | `http://mcposerver:8000/postgres`, spec `openapi.json` | `TOOL_SERVER_CONNECTIONS` in `env/owui.env` | Automated |
+| GitHub MCP | MCP Streamable HTTP | `https://api.githubcopilot.com/mcp/` | Settings > Admin > External Tools, Bearer + GitHub PAT | Manual |
+| gitmcp.io | MCP Streamable HTTP | `https://gitmcp.io/docs` | Settings > Admin > External Tools, no auth | Manual |
+
+```mermaid
+flowchart LR
+    owui["openwebui<br/>Open WebUI"]
+    admin["Settings > Admin ><br/>External Tools"]
+    subgraph backend["backend network"]
+        mcpo["mcposerver<br/>mcpo git-788ff92"]
+        pgmcp["uvx postgres-mcp 0.3.0<br/>--access-mode=restricted"]
+        db[("db<br/>pgvector pg17<br/>database openwebui")]
+    end
+    gh["GitHub MCP<br/>api.githubcopilot.com/mcp/"]
+    gitmcp["gitmcp.io/docs"]
+
+    owui -->|"OpenAPI, TOOL_SERVER_CONNECTIONS"| mcpo
+    mcpo -->|"stdio"| pgmcp
+    pgmcp -->|"read-only SQL, db:5432"| db
+    owui -->|"MCP Streamable HTTP"| gh
+    owui -->|"MCP Streamable HTTP"| gitmcp
+    admin -.->|"added by hand"| gh
+    admin -.->|"added by hand"| gitmcp
+```
+
+mcpo is needed because Open WebUI's native MCP client speaks Streamable HTTP only, while `postgres-mcp` 0.3.0 serves stdio or SSE. mcpo runs it over stdio and exposes its tools as an OpenAPI server.
+
+#### Postgres MCP server
+
+| Setting | Value |
+|---------|-------|
+| Image | `ghcr.io/open-webui/mcpo:git-788ff92` (mcpo v0.0.20) |
+| Start | `mcpo --config /app/conf/config.json`, after `db` is healthy (standalone: `depends_on`; Swarm: `wait-for-services.sh db:5432`) |
+| Server | `uvx postgres-mcp@0.3.0` (crystaldba) |
+| Access mode | `--access-mode=restricted`: read-only transactions with an execution time limit |
+| MCP SDK | `--with "mcp<2"` keeps the SDK on 1.x |
+| Dependency override | `--overrides /app/conf/uv-overrides.txt` pins `pglast==7.21`. 0.3.0 pins `pglast==7.2.0`, which is no longer on PyPI (the 7.x line keeps only 7.20 and 7.21), so without the override the server cannot install and its tools never load. 7.21 is the same PostgreSQL 17 parser line |
+| Database | the stack's own `db` (`pgvector/pgvector:0.8.7-pg17-bookworm`), database `openwebui`, as user `postgres` |
+| Password | `config.json.example` carries the placeholder `change_me`. `bootstrap.sh` generates `POSTGRES_PASSWORD` in `env/db.env` and writes it into `env/owui.env`, `env/mcp.env` and `conf/mcposerver/config.json`. On Swarm, `scripts/deploy-swarm.sh` syncs `conf/mcposerver/` to `${DATA_ROOT}/open-webui/mcposerver/conf` and injects the password there |
+| Mount | standalone `./conf/mcposerver:/app/conf:ro`; Swarm `${DATA_ROOT}/open-webui/mcposerver/conf:/app/conf:ro` |
+| Network | `backend` |
+| Health check | `curl -sf http://127.0.0.1:8000/postgres/openapi.json \| grep -q execute_sql`. `/docs` answers even when the postgres server failed to start, so the check probes the tool route |
+| Open WebUI auth | `auth_type: "none"` (mcpo runs without `--api-key`) |
+| Access | admins only (`config.access_grants: []`). 0.12 loads a server only when `config.enable` is `true` |
+| `env/mcp.env` | `DATABASE_URL`, reference only. mcpo reads the connection string from `config.json` args |
+
+#### Postgres MCP tools
+
+| Tool | What it does |
+|------|--------------|
+| `list_schemas` | Lists the schemas in the database |
+| `list_objects` | Lists tables, views, sequences and extensions in a schema |
+| `get_object_details` | Shows one object's columns, constraints and indexes |
+| `execute_sql` | Runs SQL; restricted mode allows reads only |
+| `explain_query` | Returns the execution plan for a query, optionally with hypothetical indexes |
+| `get_top_queries` | Reports the slowest queries by total execution time from `pg_stat_statements` |
+| `analyze_workload_indexes` | Finds resource-heavy queries in the workload and recommends indexes |
+| `analyze_query_indexes` | Recommends indexes for up to 10 given queries |
+| `analyze_db_health` | Checks buffer cache hit rate, connections, constraints, index health, sequence limits and vacuum health |
+
+`get_top_queries` and `analyze_workload_indexes` need the `pg_stat_statements` extension (listed in `shared_preload_libraries`), and the index recommendations and hypothetical-index plans need `hypopg`. The `db` init creates only the `vector` extension (`conf/postgres/init/entrypoint.sh`), so install both before relying on those tools.
+
+> **Existing install:** an older `TOOL_SERVER_CONNECTIONS` seed lacked `config.enable`, so 0.12 never loads that server. In Settings > Admin > External Tools, enable the `mcposerver:8000/postgres` entry and set Auth to **None** (row 4 in the [upgrade checklist](#upgrading-from-a-pre-012-version-of-this-stack)).
+
+#### Native Streamable HTTP servers
 
 <table>
 <tr>
@@ -175,11 +241,11 @@ Search results will change: SearXNG upstream removed reddit and searchcode, and 
 | `OPENROUTER_API_KEY` | OpenRouter Image pipe |
 | `OPENAI_API_KEYS` | OpenAI, OpenRouter and Anthropic connection keys (fresh-install seed) |
 
-### API Keys (commented out — uncomment when needed)
+### API Keys (commented out, uncomment when needed)
 
 | Variable | Tool | Where to Get It |
 |----------|------|-----------------|
-| `YOUTUBE_API_KEY` | YouTube Search tool, Mopidy controller | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) — enable YouTube Data API v3 |
+| `YOUTUBE_API_KEY` | YouTube Search tool, Mopidy controller | [Google Cloud Console](https://console.cloud.google.com/apis/credentials), enable YouTube Data API v3 |
 | `PEXELS_API_KEY` | Pexels Image/Video Search tool | [Pexels API](https://www.pexels.com/api/) (free) |
 | `HF_API_KEY` | HuggingFace Image Generator tool | [HuggingFace Settings](https://huggingface.co/settings/tokens) |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare Image Generator tool | Cloudflare dashboard |
@@ -295,7 +361,7 @@ Each ComfyUI tool requires specific models and workflows loaded in ComfyUI.
 2. Import the JSON workflow from `conf/tools/extras/`
 3. If any nodes show as missing: install the required custom node package
 4. Verify the workflow runs manually before using from Open WebUI
-5. In Open WebUI, configure the tool's Valves (admin panel) — node IDs should match defaults unless you modified the workflow
+5. In Open WebUI, configure the tool's Valves (admin panel). Node IDs should match defaults unless you modified the workflow
 
 ### VRAM Management
 
@@ -311,7 +377,7 @@ Several tools support `unload_ollama_models` (default: off). When enabled, tools
 
 > **Automated:** All function pipe Python files are pushed to Open WebUI via `tools-init` on every deploy. Pipes that use env vars (e.g. `GOOGLE_API_KEY`, `TAVILY_API_KEY`) pick them up automatically if set in `env/owui.env`.
 >
-> **Manual:** Each pipe's Valves must be configured in the Admin Panel — model IDs, temperature settings, external service URLs, and API keys that aren't covered by env vars.
+> **Manual:** Each pipe's Valves must be configured in the Admin Panel: model IDs, temperature settings, external service URLs, and API keys that aren't covered by env vars.
 
 <table>
 <tr>
@@ -397,7 +463,7 @@ Several tools support `unload_ollama_models` (default: off). When enabled, tools
 <img src="https://img.shields.io/badge/automated-deploy_push_via_tools--init-4CAF50?style=flat-square" alt="Deploy push automated"/>
 <img src="https://img.shields.io/badge/manual-upstream_pull_%2B_host_patching-FF9800?style=flat-square" alt="Pull + patch manual"/>
 
-> **Automated:** `tools-init` pushes whatever is in `conf/tools/` on every deploy — no manual upload needed after syncing files locally.
+> **Automated:** `tools-init` pushes whatever is in `conf/tools/` on every deploy, so no manual upload is needed after syncing files locally.
 >
 > **Manual:** Pulling from upstream and patching the hardcoded service hosts in Valve defaults must be done locally before deploying.
 
