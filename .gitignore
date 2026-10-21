@@ -5,7 +5,7 @@ env/*.env
 
 # mcpo config gets postgres password injected at bootstrap/deploy time — exclude the runtime copy
 conf/mcposerver/config.json
-# backup written when bootstrap migrates an old config.json (contains the password)
+# sed's in-place temp file, removed right after the edit but left behind if a run is interrupted (contains the password)
 conf/mcposerver/*.bak
 
 # runtime data

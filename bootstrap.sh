@@ -135,9 +135,38 @@ if [ ! -f conf/mcposerver/config.json ]; then
 fi
 # Replace an old postgres-mcp-server config; the password is re-injected below
 if grep -q '"postgres-mcp-server"' conf/mcposerver/config.json 2>/dev/null; then
-  cp conf/mcposerver/config.json conf/mcposerver/config.json.pre-postgres-mcp.bak
   cp conf/mcposerver/config.json.example conf/mcposerver/config.json
-  success "  Migrated conf/mcposerver/config.json to postgres-mcp (backup: config.json.pre-postgres-mcp.bak)"
+  success "  Migrated conf/mcposerver/config.json to postgres-mcp"
+fi
+# postgres-mcp needs the uv overrides file (pglast pin); add it to a config written before it
+# existed, in place so any other servers are kept. With neither jq nor python3 the config is
+# regenerated from the example (the password is re-injected below).
+if grep -q '"postgres-mcp@' conf/mcposerver/config.json 2>/dev/null && \
+   ! grep -q 'uv-overrides.txt' conf/mcposerver/config.json 2>/dev/null; then
+  if command -v jq >/dev/null 2>&1; then
+    jq '(.mcpServers[] | select(any(.args[]?; type == "string" and startswith("postgres-mcp@"))) | .args)
+          |= ["--overrides", "/app/conf/uv-overrides.txt"] + .' \
+      conf/mcposerver/config.json > conf/mcposerver/config.json.tmp \
+      && mv conf/mcposerver/config.json.tmp conf/mcposerver/config.json
+    success "  Added the uv overrides file to conf/mcposerver/config.json"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+for server in data.get('mcpServers', {}).values():
+    args = server.get('args', [])
+    if any(isinstance(a, str) and a.startswith('postgres-mcp@') for a in args):
+        server['args'] = ['--overrides', '/app/conf/uv-overrides.txt'] + args
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+" conf/mcposerver/config.json
+    success "  Added the uv overrides file to conf/mcposerver/config.json"
+  else
+    cp conf/mcposerver/config.json.example conf/mcposerver/config.json
+    warn "  Regenerated conf/mcposerver/config.json from the example (no jq or python3 to edit it in place); re-add any MCP servers you had added"
+  fi
 fi
 
 # Update postgres password consistently across all files

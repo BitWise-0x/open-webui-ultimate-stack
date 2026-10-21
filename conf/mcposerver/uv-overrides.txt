@@ -1,0 +1,5 @@
+# Dependency overrides for the MCP servers mcpo launches with uvx (passed as --overrides).
+# postgres-mcp 0.3.0 pins pglast==7.2.0, which is no longer on PyPI (the 7.x line now keeps only
+# 7.20 and 7.21), so uvx cannot resolve it without this. 7.21 is the same major line, the
+# PostgreSQL 17 parser that 0.3.0 was written against.
+pglast==7.21

@@ -255,9 +255,26 @@ if [ ! -f "${MCP_DST}/config.json" ]; then
 fi
 # Replace an old postgres-mcp-server config; the password is re-injected below
 if sudo grep -q '"postgres-mcp-server"' "${MCP_DST}/config.json" 2>/dev/null; then
-  sudo cp "${MCP_DST}/config.json" "${MCP_DST}/config.json.pre-postgres-mcp.bak"
   sudo cp "${MCP_DST}/config.json.example" "${MCP_DST}/config.json"
-  echo "[+] Migrated mcposerver config.json from postgres-mcp-server to postgres-mcp (backup: config.json.pre-postgres-mcp.bak)"
+  echo "[+] Migrated mcposerver config.json from postgres-mcp-server to postgres-mcp"
+fi
+# postgres-mcp needs the uv overrides file (pglast pin, synced above); add it to a config written
+# before it existed, keeping any other servers
+if sudo grep -q '"postgres-mcp@' "${MCP_DST}/config.json" 2>/dev/null && \
+   ! sudo grep -q 'uv-overrides.txt' "${MCP_DST}/config.json" 2>/dev/null; then
+  sudo "$(command -v python3)" -c "
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+for server in data.get('mcpServers', {}).values():
+    args = server.get('args', [])
+    if any(isinstance(a, str) and a.startswith('postgres-mcp@') for a in args):
+        server['args'] = ['--overrides', '/app/conf/uv-overrides.txt'] + args
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+" "${MCP_DST}/config.json"
+  echo "[+] Added the uv overrides file to mcposerver config.json"
 fi
 # Inject postgres password — Python handles all special characters safely, idempotent on re-deploy.
 # Uses rfind('@') to locate the userinfo/host boundary, so passwords containing '@' are handled correctly.

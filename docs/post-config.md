@@ -23,7 +23,7 @@ Local path: `conf/tools/` (tools, functions, filters, extras subdirectories).
 >
 > **Manual:** Native Streamable HTTP connections (GitHub, gitmcp.io) must be added through the Admin UI — Open WebUI does not support pre-configuring these via env vars or API.
 >
-> **Postgres MCP server:** `postgres-mcp` in restricted (read-only) mode. Admin-only by default.
+> **Postgres MCP server:** `postgres-mcp` 0.3.0 in restricted (read-only) mode. Admin-only by default. `uvx` starts it with `--overrides /app/conf/uv-overrides.txt`, which pins `pglast` to 7.21: 0.3.0 pins `pglast==7.2.0`, which is no longer on PyPI, so without the override the server cannot install and its tools never load.
 
 <table>
 <tr>
@@ -132,7 +132,7 @@ The Open WebUI image is pinned with `OWUI_TAG` (default `0.12.3`, override in `.
 Pull the repository, then re-run `bootstrap.sh`. It handles these automatically:
 
 - creates `env/jupyter.env`, generates the token, and adds `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN` to your existing `env/owui.env`
-- migrates `conf/mcposerver/config.json` from `postgres-mcp-server` to `postgres-mcp` (backup kept as `config.json.pre-postgres-mcp.bak`)
+- brings `conf/mcposerver/config.json` up to date: replaces a `postgres-mcp-server` config with `postgres-mcp`, and adds the uv overrides file to a `postgres-mcp` config that lacks it, keeping any other MCP servers
 - stops if `.env` still pins Tika 3 (`TIKA_TAG=3.x`); change it to `4.1.0-1` or delete the line
 - on Swarm: creates the `jupyter` overlay network, removes leftover Tika 3 and uWSGI config files from `DATA_ROOT`, and scales `openwebui` to 0 for the image change
 
