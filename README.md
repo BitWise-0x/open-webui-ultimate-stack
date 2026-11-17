@@ -52,12 +52,12 @@ graph TD
         redis["<b>redis</b><br>valkey/valkey:9.1-alpine<br>:6379"]
     end
 
-    subgraph Search & Documents
+    subgraph search["Search & Documents"]
         searxng["<b>searxng</b><br>searxng/searxng:2026.10.16<br>:8080 → :8888"]
         tika["<b>tika</b><br>apache/tika:4.1.0-1-full<br>:9998"]
     end
 
-    subgraph AI Integrations
+    subgraph ai["AI Integrations"]
         edgetts["<b>edgetts</b><br>openai-edge-tts<br>:5050"]
         mcpo["<b>mcposerver</b><br>ghcr.io/open-webui/mcpo:git-788ff92<br>runs postgres-mcp 0.3.0<br>:8000"]
         jupyter["<b>jupyter</b><br>quay.io/jupyter/scipy-notebook<br>:8888 (isolated network)"]
@@ -78,6 +78,14 @@ graph TD
     searxng --> redis
     mcpo -->|"postgres-mcp, read-only"| db
     tools -.->|"API push on deploy"| owui
+    classDef default fill:#efb146,stroke:#a96a19,stroke-width:2px,color:#0c0f0e
+    classDef quiet fill:#1b221f,stroke:#2e3733,stroke-width:2px,color:#e7ece8
+    linkStyle default stroke:#efb146,stroke-width:2px
+    class User,db,redis quiet
+    style Core fill:transparent,stroke:#a96a19,stroke-width:1px,stroke-dasharray:5 4,color:#a96a19
+    style search fill:transparent,stroke:#a96a19,stroke-width:1px,stroke-dasharray:5 4,color:#a96a19
+    style ai fill:transparent,stroke:#a96a19,stroke-width:1px,stroke-dasharray:5 4,color:#a96a19
+    style Automation fill:transparent,stroke:#a96a19,stroke-width:1px,stroke-dasharray:5 4,color:#a96a19
 ```
 
 <br>
@@ -559,3 +567,11 @@ All tools retain their original author metadata in their docstring headers.
 ## License
 
 MIT License: see [LICENSE](LICENSE) for details.
+
+<br>
+
+---
+
+<p align="center">
+  <sub>A <a href="https://bitwise0x.com"><b>BitWise</b></a> product</sub>
+</p>

@@ -48,6 +48,11 @@ flowchart LR
     owui -->|"MCP Streamable HTTP"| gitmcp
     admin -.->|"added by hand"| gh
     admin -.->|"added by hand"| gitmcp
+    classDef default fill:#efb146,stroke:#a96a19,stroke-width:2px,color:#0c0f0e
+    classDef quiet fill:#1b221f,stroke:#2e3733,stroke-width:2px,color:#e7ece8
+    linkStyle default stroke:#efb146,stroke-width:2px
+    class admin,gh,gitmcp quiet
+    style backend fill:transparent,stroke:#a96a19,stroke-width:1px,stroke-dasharray:5 4,color:#a96a19
 ```
 
 mcpo is needed because Open WebUI's native MCP client speaks Streamable HTTP only, while `postgres-mcp` 0.3.0 serves stdio or SSE. mcpo runs it over stdio and exposes its tools as an OpenAPI server.
